@@ -596,6 +596,13 @@ export async function staffUpdateAppointment(id: number, patch: AppointmentUpdat
     if (after && (!before || after.date !== before.date || after.time !== before.time)) {
       await settlePool(after.date, after.time);
     }
+    // moved to another day or time: a reminder already sent for the old slot
+    // must not stop the new slot's reminders
+    if (before && after && (after.date !== before.date || after.time !== before.time)) {
+      const { messageLog } = await import("@/db/schema");
+      const { and, eq, like } = await import("drizzle-orm");
+      await db.delete(messageLog).where(and(eq(messageLog.appointmentId, id), like(messageLog.kind, "reminder_%")));
+    }
   }
   revalidateAll();
 }

@@ -6964,3 +6964,43 @@ label.btn-primary-staff.disabled {
   cursor: pointer;
 }
 .de-filter button.on { background: var(--staff-primary); border-color: var(--staff-primary); color: #fff; }
+
+/* ── Schedule: drag a booking card to another time / dentist ─────────────── */
+.appt-chip-card[draggable="true"] { cursor: grab; }
+.appt-chip-card[draggable="true"]:active { cursor: grabbing; }
+
+.modal-card.move-card { max-width: 520px; }
+.move-from-to {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  color: var(--staff-ink-muted);
+}
+.move-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--staff-border);
+  background: var(--staff-surface-subtle);
+  font-size: 13px;
+  color: var(--staff-ink-2);
+  min-width: 0;
+}
+.move-slot strong { font-size: 20px; font-weight: 500; color: var(--staff-ink); }
+.move-slot.to { border-color: var(--staff-primary); background: var(--staff-primary-light); }
+.move-k { font-size: 12px; color: var(--staff-ink-muted); }
+.move-what { font-size: 14px; color: var(--staff-ink-2); }
+.move-warn {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff4d6;
+  color: #8a6510;
+  font-size: 13.5px;
+}
+.move-notify { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.move-notify input { width: 18px; height: 18px; accent-color: var(--staff-primary); }
+.move-note { margin: 0; font-size: 13.5px; color: var(--staff-ink-muted); }

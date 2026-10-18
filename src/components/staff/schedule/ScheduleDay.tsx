@@ -3,7 +3,8 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
-import { addDays, weekday, daysFrom, fmtLong } from "@/lib/dates";
+import { addDays, weekday, daysFrom, fmtLong, thaiDate } from "@/lib/dates";
+import { canTreat } from "@/lib/convert";
 import { useT } from "@/i18n/lang";
 import { BookingModal } from "@/components/staff/schedule/BookingModal";
 import { AppointmentDetailModal } from "@/components/staff/schedule/AppointmentDetailModal";
@@ -39,6 +40,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
     waitlist,
     showToast,
     rescheduleAppointment,
+    messageFamily,
     updateWaitlistStatus,
     assignWaitingDentist,
     removeWaitlist,
@@ -62,6 +64,14 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
   // Drag and drop states
   const [draggingApptId, setDraggingApptId] = useState<string | null>(null);
   const [dragOverSlotKey, setDragOverSlotKey] = useState<string | null>(null);
+  /** a dropped card waiting for "ย้ายนัด?" — nothing moves until staff confirm */
+  const [pendingMove, setPendingMove] = useState<{
+    appt: StaffAppointment;
+    date: string;
+    time: string;
+    dentistSlug: string;
+  } | null>(null);
+  const [notifyFamily, setNotifyFamily] = useState(true);
 
   // Check weekday
   const weekdayKey = weekday(selectedDate);
@@ -211,9 +221,9 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
       return;
     }
 
-    // Check if slot already has an appointment
+    // any live booking holds the slot — checked in or in the chair too
     const existing = dayAppts.find(
-      (a) => a.id !== apptId && a.dentistSlug === targetDentistSlug && a.time === targetTime && a.status === "confirmed"
+      (a) => a.id !== apptId && a.dentistSlug === targetDentistSlug && a.time === targetTime && a.status !== "cancelled"
     );
 
     if (existing) {
@@ -221,11 +231,26 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
       return;
     }
 
-    rescheduleAppointment(apptId, targetDate, targetTime, targetDentistSlug);
+    // ask first — and offer to tell the family on LINE
+    setNotifyFamily(!!targetAppt.hasLine);
+    setPendingMove({ appt: targetAppt, date: targetDate, time: targetTime, dentistSlug: targetDentistSlug });
+  };
 
-    const doc = dentists.find((d) => d.slug === targetDentistSlug);
-    const docName = doc ? doc.text.th.name : "ทันตแพทย์";
-    showToast(`ย้ายนัดหมาย ${targetAppt.childName} เป็น ${targetTime} น. (${docName}) สำเร็จ`);
+  const docName = (slug: string | null | undefined) =>
+    dentists.find((d) => d.slug === slug)?.text.th.name ?? "ยังไม่จัดแพทย์";
+
+  /** what the family reads on LINE when the clinic moves their booking */
+  const moveMessage = (m: NonNullable<typeof pendingMove>) =>
+    `แจ้งเปลี่ยนเวลานัด 🦷\nนัดของ ${m.appt.childName} ย้ายเป็น ${thaiDate(m.date)} เวลา ${m.time} น.` +
+    `\nกับ ${docName(m.dentistSlug)}\nรหัสจอง: ${m.appt.ref}\nหากไม่สะดวก ติดต่อคลินิกได้เลยค่ะ`;
+
+  const confirmMove = () => {
+    if (!pendingMove) return;
+    const m = pendingMove;
+    rescheduleAppointment(m.appt.id, m.date, m.time, m.dentistSlug);
+    if (notifyFamily && m.appt.hasLine) void messageFamily(m.appt.id, moveMessage(m));
+    else showToast(`ย้ายนัด ${m.appt.childName} เป็น ${m.time} น. (${docName(m.dentistSlug)})`);
+    setPendingMove(null);
   };
 
   return (
@@ -555,6 +580,65 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
       </div>
 
       {/* ── Modals ────────────────────────────────────────────────────── */}
+      {pendingMove ? (() => {
+        const m = pendingMove;
+        const doc = dentists.find((d) => d.slug === m.dentistSlug);
+        const cannot = doc && !canTreat(doc.treats, m.appt.treatmentKey, doc.treatAges, m.appt.ageGroup);
+        return (
+          <div className="modal-overlay" onClick={() => setPendingMove(null)}>
+            <div className="modal-card move-card" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>ย้ายนัด {m.appt.childName}?</h3>
+                <button type="button" className="btn-action-icon" onClick={() => setPendingMove(null)} aria-label="ปิด">
+                  <IconX size={16} />
+                </button>
+              </div>
+              <div className="modal-body">
+                <div className="move-from-to">
+                  <div className="move-slot">
+                    <span className="move-k">จาก</span>
+                    <strong>{m.appt.time} น.</strong>
+                    <span>{m.appt.date === m.date ? "" : `${thaiDate(m.appt.date)} · `}{docName(m.appt.dentistSlug)}</span>
+                  </div>
+                  <IconChevronRight size={18} />
+                  <div className="move-slot to">
+                    <span className="move-k">เป็น</span>
+                    <strong>{m.time} น.</strong>
+                    <span>{m.appt.date === m.date ? "" : `${thaiDate(m.date)} · `}{docName(m.dentistSlug)}</span>
+                  </div>
+                </div>
+                <div className="move-what">
+                  {tr.name(m.appt.treatmentKey)} <AgeTag group={m.appt.ageGroup} /> · {m.appt.ref}
+                </div>
+                {cannot ? (
+                  <p className="move-warn">
+                    {docName(m.dentistSlug)} ไม่ได้ตั้งให้รับ “{tr.name(m.appt.treatmentKey)}”
+                    {m.appt.ageGroup ? ` สำหรับ${m.appt.ageGroup === "kid" ? "เด็ก" : "ผู้ใหญ่"}` : ""} — ย้ายได้ แต่ตรวจสอบกับคุณหมอก่อน
+                  </p>
+                ) : null}
+                {m.appt.hasLine ? (
+                  <label className="move-notify">
+                    <input type="checkbox" checked={notifyFamily} onChange={(e) => setNotifyFamily(e.target.checked)} />
+                    <span>แจ้งผู้ปกครองทาง LINE ว่าเปลี่ยนเวลานัด</span>
+                  </label>
+                ) : (
+                  <p className="move-note">นัดนี้ไม่ได้จองผ่าน LINE — โทรแจ้งผู้ปกครองที่ {m.appt.phone}</p>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary-staff" onClick={() => setPendingMove(null)}>
+                  ยกเลิก
+                </button>
+                <button type="button" className="btn-primary-staff" onClick={confirmMove}>
+                  <IconCheck size={16} />
+                  <span>ย้ายนัด</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
+
       {selectedAppt && (
         <AppointmentDetailModal
           appointment={selectedAppt}

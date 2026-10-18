@@ -9,7 +9,8 @@
   "app": {
     "windows": [
       {
-        "title": "Denta Kids — Staff (Full)"
+        "title": "Denta Kids — Staff (Full)",
+        "dragDropEnabled": false
       }
     ]
   }
