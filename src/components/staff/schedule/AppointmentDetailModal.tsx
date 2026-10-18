@@ -19,6 +19,7 @@ import {
   IconDollar,
 } from "@/components/staff/shell/staffIcons";
 import { PatientFileButton } from "@/components/staff/patients/PatientFileView";
+import { AgeTag } from "@/components/staff/shell/AgeTag";
 
 /** quick reasons the desk can drop into the message to the family */
 const REASONS = ["คุณหมอติดธุระ", "คุณหมอลา", "คลินิกปิดทำการ"];
@@ -391,6 +392,7 @@ export function AppointmentDetailModal({
                     }}
                   >
                     <span>{appointment.phone}</span>
+                    <AgeTag group={appointment.ageGroup} />
                     {appointment.lineName ? (
                       <span className="line-tag" title="จองผ่าน LINE">
                         LINE · {appointment.lineName}

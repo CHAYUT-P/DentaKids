@@ -38,6 +38,7 @@ import {
 } from "@/server/queries";
 import type { WaitlistDTO } from "@/server/queries";
 import { thaiDate, todayISO } from "@/lib/dates";
+import { isAgeGroup, type AgeGroup } from "@/lib/ageGroup";
 import type { Perm } from "@/lib/roles";
 import type { VisitRecordInput } from "@/lib/staffTypes";
 
@@ -166,6 +167,8 @@ async function slotVerdict(
   time: string,
   treatmentKey: TreatmentKey,
   dentistId: number | null,
+  /** who it's for — only dentists who see that group count */
+  group: AgeGroup | null = null,
 ): Promise<"ok" | "invalid" | "slot_taken"> {
   const { todayISO, nowMinutes, minutesOf } = await import("@/lib/dates");
   const today = todayISO();
@@ -187,7 +190,7 @@ async function slotVerdict(
       liveAtSlot(date, time),
       activeHoldsAtSlot(date, time),
       slotsForDate(date),
-      capableDentistIds(treatmentKey),
+      capableDentistIds(treatmentKey, group),
     ]);
     if (live.length + holds >= chairs) return "slot_taken";
     const capableSet = new Set(capable);
@@ -200,7 +203,7 @@ async function slotVerdict(
   // slotsForDate rows only exist inside enabled shifts on open days, and an
   // active hold marks the slot taken exactly like a booking
   const [capable, rows] = await Promise.all([
-    capableDentistIds(treatmentKey),
+    capableDentistIds(treatmentKey, group),
     slotsForDate(date),
   ]);
   if (!capable.includes(dentistId)) return "invalid";
@@ -221,16 +224,24 @@ export async function holdSlot(input: {
   treatmentKey: TreatmentKey;
   /** dentist id, or null for "any dentist" — holds a chair */
   dentistId: number | null;
+  /** who it's for — "kid" (under 12) or "adult" */
+  ageGroup?: AgeGroup | null;
 }): Promise<{ ok: boolean; token?: string; expiresAt?: string }> {
   if (await limited("hold", 30, 600)) return { ok: false };
   if (!input.date || !input.time || !input.treatmentKey) return { ok: false };
   const { isBookableTreatment } = await import("@/server/queries");
   if (!(await isBookableTreatment(input.treatmentKey))) return { ok: false };
-  if ((await slotVerdict(input.date, input.time, input.treatmentKey, input.dentistId)) !== "ok") {
+  const group = isAgeGroup(input.ageGroup) ? input.ageGroup : null;
+  if ((await slotVerdict(input.date, input.time, input.treatmentKey, input.dentistId, group)) !== "ok") {
     return { ok: false };
   }
   const { createHold } = await import("@/server/queries");
-  const hold = await createHold(input);
+  const hold = await createHold({
+    date: input.date,
+    time: input.time,
+    treatmentKey: input.treatmentKey,
+    dentistId: input.dentistId,
+  });
   if (!hold) return { ok: false }; // an active hold landed mid-flight
   return { ok: true, token: hold.token, expiresAt: hold.expiresAt.toISOString() };
 }
@@ -254,6 +265,8 @@ export async function bookAppointment(input: {
   guardianName?: string;
   phone: string;
   forSelf?: boolean;
+  /** who it's for — "kid" (under 12) or "adult"; only dentists who see that group are offered */
+  ageGroup?: AgeGroup | null;
   /** token from holdSlot — the slot reservation being confirmed */
   holdToken?: string;
   /** LIFF ID token when the page runs inside LINE — verified server-side */
@@ -276,6 +289,7 @@ export async function bookAppointment(input: {
   // can't trip the checks below; if it lapsed and someone grabbed the slot
   // meanwhile, the normal validation still fails honestly
   const dentistId = input.dentistId;
+  const ageGroup = isAgeGroup(input.ageGroup) ? input.ageGroup : null;
   if (input.holdToken) {
     const { releaseHold } = await import("@/server/queries");
     await releaseHold(input.holdToken);
@@ -288,7 +302,7 @@ export async function bookAppointment(input: {
   const identity = await patientIdentity(input.lineIdToken);
   if (!identity && process.env.LINE_LOGIN_CHANNEL_ID) return { ok: false, error: "line" };
 
-  const verdict = await slotVerdict(input.date, input.time, input.treatmentKey, dentistId);
+  const verdict = await slotVerdict(input.date, input.time, input.treatmentKey, dentistId, ageGroup);
   if (verdict !== "ok") {
     // at capacity the pressure valve runs first — the oldest pooled booking
     // takes a remaining free dentist — and the newcomer is turned away either way
@@ -308,6 +322,7 @@ export async function bookAppointment(input: {
     guardianName: input.guardianName?.trim() || name,
     phone: input.phone,
     forSelf: input.forSelf ?? false,
+    ageGroup,
     source: "online",
     price: null,
     lineUserId: identity?.userId,
@@ -351,7 +366,7 @@ export async function assignPoolDentist(
   if (!target || target.status === "cancelled" || target.dentistId !== null) {
     return { ok: false, error: "invalid" };
   }
-  const free = await freeCapableAtSlot(target.date, target.time, target.treatmentKey);
+  const free = await freeCapableAtSlot(target.date, target.time, target.treatmentKey, target.ageGroup);
   if (!free.some((f) => f.id === dentistId)) return { ok: false, error: "taken" };
   await updateAppointment(id, { dentistId });
   const { settlePool } = await import("@/server/queries");
@@ -395,6 +410,7 @@ export async function myBookingsByLine(lineIdToken: string) {
     dentistSlug: a.dentistSlug,
     status: a.status,
     childName: a.childName,
+    ageGroup: a.ageGroup,
   }));
 }
 
@@ -475,7 +491,7 @@ export async function rescheduleBooking(input: {
     await releaseHold(input.holdToken);
   }
 
-  const verdict = await slotVerdict(input.date, input.time, target.treatmentKey, target.dentistId);
+  const verdict = await slotVerdict(input.date, input.time, target.treatmentKey, target.dentistId, target.ageGroup);
   if (verdict !== "ok") return { ok: false, error: verdict };
 
   try {

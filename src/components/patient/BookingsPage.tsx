@@ -117,7 +117,13 @@ export function BookingsPage({
 
   /** the old slot rides in sessionStorage only for the banner on /book */
   function doPostpone(a: Row) {
-    const handoff: RescheduleHandoff = { ref: a.ref, date: a.date, time: a.time, childName: a.childName };
+    const handoff: RescheduleHandoff = {
+      ref: a.ref,
+      date: a.date,
+      time: a.time,
+      childName: a.childName,
+      ageGroup: a.ageGroup,
+    };
     try {
       sessionStorage.setItem(RESCHEDULE_KEY, JSON.stringify(handoff));
     } catch {

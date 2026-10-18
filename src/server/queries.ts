@@ -11,6 +11,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql }
 import type { IconKey } from "@/data/icons";
 import { isIconKey } from "@/data/icons";
 import { addDays, minutesOf, todayISO, weekday, weekdayIndex } from "@/lib/dates";
+import { agesAllow, isAgeGroup, isTreatAges, type AgeGroup, type TreatAges } from "@/lib/ageGroup";
 import { newTreatmentKey, toTreatmentInfo, type TreatmentInfo, type TreatmentKey } from "@/lib/treatments";
 import type { PatientChildInput, PatientUpsertInput, VisitItem } from "@/lib/staffTypes";
 /**
@@ -64,6 +65,8 @@ export interface DentistDTO {
   photoLarge: string;
   isActive: boolean;
   treats: IconKey[];
+  /** per treatment, who they see — only entries that aren't "both" */
+  treatAges: Partial<Record<string, TreatAges>>;
   shifts: { weekday: number; enabled: boolean; start: string; end: string }[];
   text: Record<"th" | "en", DentistTextDTO>;
 }
@@ -121,6 +124,8 @@ export interface AppointmentDTO {
   note: string;
   price: number | null;
   forSelf: boolean;
+  /** "kid" / "adult" as the family picked it; null = not asked (older or staff bookings) */
+  ageGroup: AgeGroup | null;
   /** LINE display name of the account that booked ("" = not booked in LINE) */
   lineName: string;
   /** the booking carries a LINE account the clinic can message */
@@ -237,6 +242,11 @@ export async function listDentists(): Promise<DentistDTO[]> {
       photoLarge: d.photoLarge,
       isActive: d.isActive,
       treats: treats.filter((t) => t.dentistId === d.id).map((t) => asIconKey(t.treatmentKey)),
+      treatAges: Object.fromEntries(
+        treats
+          .filter((t) => t.dentistId === d.id && isTreatAges(t.ages) && t.ages !== "both")
+          .map((t) => [t.treatmentKey, t.ages as TreatAges]),
+      ),
       shifts: shifts
         .filter((s) => s.dentistId === d.id)
         .map((s) => ({ weekday: s.weekday, enabled: s.enabled, start: s.start, end: s.end })),
@@ -573,25 +583,36 @@ export async function setChairs(n: number): Promise<void> {
 /** the routine visits every dentist takes — mirrors convert.ts (client copy) */
 const GENERAL_TREATS: IconKey[] = ["checkup", "consult", "followup"];
 
-/** ids of active dentists who take this treatment (routine visits: everyone) */
-export async function capableDentistIds(treatmentKey: TreatmentKey): Promise<number[]> {
+/**
+ * ids of active dentists who take this treatment (routine visits: everyone),
+ * narrowed to those who see this age group when one is given — a dentist who
+ * takes braces for adults only is not offered for a kid's braces.
+ */
+export async function capableDentistIds(treatmentKey: TreatmentKey, group?: AgeGroup | null): Promise<number[]> {
   const active = await db
     .select({ id: dentist.id })
     .from(dentist)
     .where(eq(dentist.isActive, true));
-  if ((GENERAL_TREATS as string[]).includes(treatmentKey)) return active.map((a) => a.id);
-  const claimed = await db.select({ id: dentistTreat.dentistId }).from(dentistTreat).where(
-    eq(dentistTreat.treatmentKey, treatmentKey),
-  );
-  const able = new Set(claimed.map((c) => c.id));
-  const ids = active.map((a) => a.id).filter((id) => able.has(id));
-  // a treatment nobody claims yet stays bookable with anyone, like the roster UI
-  return ids.length > 0 ? ids : active.map((a) => a.id);
+  const claimed = await db
+    .select({ id: dentistTreat.dentistId, ages: dentistTreat.ages })
+    .from(dentistTreat)
+    .where(eq(dentistTreat.treatmentKey, treatmentKey));
+  const agesOf = new Map(claimed.map((c) => [c.id, isTreatAges(c.ages) ? c.ages : undefined]));
+  let ids: number[];
+  if ((GENERAL_TREATS as string[]).includes(treatmentKey)) {
+    ids = active.map((a) => a.id);
+  } else {
+    const able = active.map((a) => a.id).filter((id) => agesOf.has(id));
+    // a treatment nobody claims yet stays bookable with anyone, like the roster UI
+    ids = able.length > 0 ? able : active.map((a) => a.id);
+  }
+  return ids.filter((id) => agesAllow(agesOf.get(id), group));
 }
 
 export interface SlotLiveRow {
   id: number;
   treatmentKey: TreatmentKey;
+  ageGroup: AgeGroup | null;
   dentistId: number | null;
   createdAt: Date;
 }
@@ -645,6 +666,7 @@ export async function liveAtSlot(date: string, time: string): Promise<SlotLiveRo
     .select({
       id: appointment.id,
       treatmentKey: appointment.treatmentKey,
+      ageGroup: appointment.ageGroup,
       dentistId: appointment.dentistId,
       createdAt: appointment.createdAt,
     })
@@ -660,6 +682,7 @@ export async function liveAtSlot(date: string, time: string): Promise<SlotLiveRo
   return rows.map((r) => ({
     id: r.id,
     treatmentKey: isIconKey(r.treatmentKey) ? r.treatmentKey : "checkup",
+    ageGroup: isAgeGroup(r.ageGroup) ? r.ageGroup : null,
     dentistId: r.dentistId,
     createdAt: r.createdAt,
   }));
@@ -763,9 +786,10 @@ export async function freeCapableAtSlot(
   date: string,
   time: string,
   treatmentKey: TreatmentKey,
+  group?: AgeGroup | null,
 ): Promise<{ id: number; slug: string }[]> {
   const [capable, slots] = await Promise.all([
-    capableDentistIds(treatmentKey),
+    capableDentistIds(treatmentKey, group),
     slotsForDate(date),
   ]);
   if (capable.length === 0) return [];
@@ -796,7 +820,7 @@ export async function settlePool(date: string, time: string): Promise<string[]> 
     if (live.length < chairs) break; // room to spare — the pool waits for staff
     const oldest = live.find((r) => r.dentistId === null);
     if (!oldest) break;
-    const free = await freeCapableAtSlot(date, time, oldest.treatmentKey);
+    const free = await freeCapableAtSlot(date, time, oldest.treatmentKey, oldest.ageGroup);
     if (free.length === 0) break;
     const target = free[0];
     const updated = await db
@@ -830,6 +854,8 @@ export interface CreateAppointmentInput {
   phone: string;
   /** booked for the booker themselves (adult) */
   forSelf?: boolean;
+  /** who it is for, as the family picked it (patient site) */
+  ageGroup?: AgeGroup | null;
   source?: AppointmentSource;
   note?: string;
   price?: number | null;
@@ -917,6 +943,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
       note: input.note ?? "",
       price: input.price ?? null,
       forSelf: input.forSelf ?? false,
+      ageGroup: input.ageGroup ?? null,
       lineUserId: input.lineUserId ?? null,
       lineName: input.lineName ?? "",
     })
@@ -972,6 +999,7 @@ function toAppointmentDTO(
     note: row.note,
     price: row.price,
     forSelf: row.forSelf,
+    ageGroup: isAgeGroup(row.ageGroup) ? row.ageGroup : null,
     lineName: row.lineName,
     hasLine: !!row.lineUserId,
   };
@@ -1647,7 +1675,21 @@ export interface DentistUpdate {
   photoLarge?: string;
   text?: Partial<Record<"th" | "en", Partial<DentistTextDTO>>>;
   treats?: IconKey[];
+  /** per treatment, who they see; anything missing is "both" */
+  treatAges?: Partial<Record<string, TreatAges>>;
   shifts?: { weekday: number; enabled: boolean; start: string; end: string }[];
+}
+
+/**
+ * The dentist_treat rows for a treatment scope: every treatment they take,
+ * with who they see for it. Routine visits (everyone takes them) only get a
+ * row when they're limited to kids or adults.
+ */
+function treatRows(dentistId: number, treats: IconKey[], treatAges: Partial<Record<string, TreatAges>> = {}) {
+  const ages = (k: string): TreatAges => (isTreatAges(treatAges[k]) ? treatAges[k]! : "both");
+  const keys = new Set<string>(treats);
+  for (const k of GENERAL_TREATS) if (ages(k) !== "both") keys.add(k);
+  return [...keys].map((k) => ({ dentistId, treatmentKey: k, ages: ages(k) }));
 }
 
 export async function updateDentist(slug: string, patch: DentistUpdate): Promise<void> {
@@ -1655,7 +1697,7 @@ export async function updateDentist(slug: string, patch: DentistUpdate): Promise
   const id = rows[0]?.id;
   if (!id) throw new Error(`unknown dentist: ${slug}`);
 
-  const { text, treats, shifts, ...plain } = patch;
+  const { text, treats, treatAges, shifts, ...plain } = patch;
 
   if (Object.keys(plain).length > 0) {
     await db
@@ -1679,8 +1721,8 @@ export async function updateDentist(slug: string, patch: DentistUpdate): Promise
 
   if (treats) {
     await db.delete(dentistTreat).where(eq(dentistTreat.dentistId, id));
-    for (const k of treats) {
-      await db.insert(dentistTreat).values({ dentistId: id, treatmentKey: k }).onConflictDoNothing();
+    for (const r of treatRows(id, treats, treatAges)) {
+      await db.insert(dentistTreat).values(r).onConflictDoNothing();
     }
   }
 
@@ -1703,6 +1745,7 @@ export interface NewDentistInput {
   tint: string;
   text: Record<"th" | "en", DentistTextDTO>;
   treats: IconKey[];
+  treatAges?: Partial<Record<string, TreatAges>>;
   shifts: { weekday: number; enabled: boolean; start: string; end: string }[];
 }
 
@@ -1724,8 +1767,8 @@ export async function createDentist(input: NewDentistInput): Promise<void> {
   for (const lang of ["th", "en"] as const) {
     await db.insert(dentistText).values({ dentistId: row.id, lang, ...input.text[lang] });
   }
-  for (const k of input.treats) {
-    await db.insert(dentistTreat).values({ dentistId: row.id, treatmentKey: k }).onConflictDoNothing();
+  for (const r of treatRows(row.id, input.treats, input.treatAges)) {
+    await db.insert(dentistTreat).values(r).onConflictDoNothing();
   }
   for (const s of input.shifts) {
     await db.insert(dentistShift).values({ dentistId: row.id, ...s }).onConflictDoNothing();

@@ -1,3 +1,4 @@
+import type { TreatAges } from "@/lib/ageGroup";
 import type { Lang } from "@/i18n/dict";
 import type { IconKey, Tint } from "./icons";
 
@@ -48,6 +49,8 @@ export type Dentist = {
   photo: Photos;
   /** what this dentist takes bookings for */
   treats: IconKey[];
+  /** per treatment, who they see — "kids", "adults"; missing = both */
+  treatAges?: Partial<Record<string, TreatAges>>;
   text: Record<Lang, DentistText>;
 };
 

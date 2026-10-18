@@ -37,7 +37,7 @@ export default function StaffDentistsPage() {
         </button>
       </div>
 
-      <div className="ledger-table" role="table" aria-label="ทันตแพทย์">
+      <div className="ledger-table doc-list" role="table" aria-label="ทันตแพทย์">
         <div className="ledger-head doc-grid" role="row">
           <span role="columnheader">ทันตแพทย์</span>
           <span role="columnheader">วันออกตรวจ</span>
@@ -52,6 +52,9 @@ export default function StaffDentistsPage() {
             return s?.enabled ? `${s.start}–${s.end} น.` : "หยุด";
           };
           const treats = d.treats.map((k) => tr.name(k)).join(" · ");
+          const ages = Object.values(d.treatAges ?? {});
+          const kidsOnly = ages.filter((v) => v === "kids").length;
+          const adultsOnly = ages.filter((v) => v === "adults").length;
           const upcoming = dentistLeaves.filter((l) => l.dentistSlug === d.slug && l.end >= today);
           const nextLeave = upcoming.at(0);
           const moreLeaves = upcoming.length - 1;
@@ -69,6 +72,13 @@ export default function StaffDentistsPage() {
                   {treats ? (
                     <span className="doc-treats" title={treats}>
                       รับตรวจ: {treats}
+                    </span>
+                  ) : null}
+                  {kidsOnly + adultsOnly > 0 ? (
+                    <span className="doc-treats">
+                      {kidsOnly > 0 ? `เด็กเท่านั้น ${kidsOnly} รายการ` : ""}
+                      {kidsOnly > 0 && adultsOnly > 0 ? " · " : ""}
+                      {adultsOnly > 0 ? `ผู้ใหญ่เท่านั้น ${adultsOnly} รายการ` : ""}
                     </span>
                   ) : null}
                 </span>

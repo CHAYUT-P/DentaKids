@@ -11,6 +11,7 @@ import type { CashierDay } from "@/lib/billing";
 import { goStaff } from "@/lib/staffNav";
 import { useStaffUser } from "@/lib/staffUser";
 import { IconCheck, IconPhone, IconWalkIn } from "@/components/staff/shell/staffIcons";
+import { AgeTag } from "@/components/staff/shell/AgeTag";
 
 /**
  * วันนี้ — today's queue in two groups. ยังไม่มา: bookings not here yet, by
@@ -215,6 +216,7 @@ export default function StaffTodayPage() {
                 <span className="tr-meta">
                   <IconPhone size={11} /> {a.phone}
                   {a.lineName ? <span className="line-tag">LINE · {a.lineName}</span> : null}
+                  <AgeTag group={a.ageGroup} />
                   <span className="tr-ref">{a.ref}</span>
                 </span>
               </button>

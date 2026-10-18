@@ -93,6 +93,8 @@ export const dentistTreat = pgTable(
       .references(() => dentist.id, { onDelete: "cascade" }),
     /** IconKey, e.g. "checkup", "braces" */
     treatmentKey: text("treatment_key").notNull(),
+    /** who they see for it: "kids" (under 12), "adults", or "both" (see lib/ageGroup) */
+    ages: text("ages").notNull().default("both"),
   },
   (t) => [uniqueIndex("dentist_treat_idx").on(t.dentistId, t.treatmentKey)],
 );
@@ -275,6 +277,9 @@ export const appointment = pgTable(
     price: integer("price"),
     /** visitFor = "self" → the booker is the patient (adult), no child */
     forSelf: boolean("for_self").notNull().default(false),
+    /** who the booking is for, as the family picked it: "kid" (under 12) or
+     *  "adult" — null for bookings made before the question (and by staff) */
+    ageGroup: text("age_group"),
     /**
      * The LINE account that made this booking (verified LIFF `sub`), and its
      * display name at booking time. Online bookings collect only a nickname +

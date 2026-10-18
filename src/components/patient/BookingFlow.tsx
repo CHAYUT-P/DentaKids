@@ -22,6 +22,7 @@ import {
 } from "@/lib/dates";
 import { dentistsForUI } from "@/lib/convert";
 import { useLine } from "@/lib/useLine";
+import { isAgeGroup, type AgeGroup } from "@/lib/ageGroup";
 import { bookAppointment, holdSlot, releaseSlotHold, rescheduleBooking } from "@/server/actions";
 import type { SlotRow } from "@/server/queries";
 import { Check, Chevron, ChevronLeft } from "@/components/shared/icons";
@@ -31,7 +32,9 @@ import { Cta, Eyebrow, Ghost, LineSignIn, Screen, Slip } from "@/components/pati
 import { ServiceIcon } from "@/components/shared/serviceIcons";
 
 /**
- * Treatment → dentist → day and time → name + phone → booked.
+ * Who it's for (kid / adult) → treatment → dentist → day and time → name +
+ * phone → booked. The kid/adult answer narrows the treatments and dentists to
+ * the ones who see that group (each dentist sets it per treatment).
  *
  * The family gives only a name to say at the desk (a nickname is enough) and a
  * phone number — no guardian/child details; staff match bookings to patient
@@ -69,6 +72,8 @@ export interface RescheduleHandoff {
   date: string;
   time: string;
   childName: string;
+  /** who the booking is for — keeps the same dentists on offer when moving it */
+  ageGroup?: AgeGroup | null;
 }
 
 /** the name + phone this family booked with last time, on this device */
@@ -363,6 +368,10 @@ export function BookingFlow(props: BookingFlowProps) {
    *  cleared from storage the moment the move succeeds */
   const [movedChild, setMovedChild] = useState<string | null>(null);
 
+  /** who it's for — asked first; a postponed booking keeps its own */
+  const [pickedGroup, setPickedGroup] = useState<AgeGroup | null>(null);
+  const group: AgeGroup | null = resched ? (isAgeGroup(handoff?.ageGroup) ? handoff.ageGroup : null) : pickedGroup;
+
   const [step, setStep] = useState<Step>(resched ? 3 : props.preTreatment ? 2 : 1);
   const [treatment, setTreatment] = useState<TreatmentKey | null>(props.preTreatment ?? null);
   /** null is a real choice here — "any dentist" — so undefined means "not yet" */
@@ -387,7 +396,9 @@ export function BookingFlow(props: BookingFlowProps) {
   const [confirmedRef, setConfirmedRef] = useState<string | null>(null);
 
   const chosen = dentist ? dentists.find((d) => d.slug === dentist) : undefined;
-  const roster = treatment ? dentistsForUI(dentists, treatment) : dentists;
+  const roster = treatment ? dentistsForUI(dentists, treatment, group) : dentists;
+  /** treatments some dentist offers to this group — the rest aren't shown */
+  const offered = (k: TreatmentKey) => dentistsForUI(dentists, k, group).length > 0;
   /** slugs able to do the picked treatment — bounds the calendar in "any" mode */
   const capable = useMemo(() => new Set(roster.map((d) => d.slug)), [roster]);
 
@@ -445,7 +456,7 @@ export function BookingFlow(props: BookingFlowProps) {
     setBookErr(null);
     if (!treatment || !date) return;
     const dentistId = dentist ? (dentists.find((d) => d.slug === dentist)?.id ?? null) : null;
-    void holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId }).then((r) => {
+    void holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId, ageGroup: group }).then((r) => {
       if (r.ok && r.token) {
         setHoldToken(r.token);
       } else {
@@ -460,7 +471,7 @@ export function BookingFlow(props: BookingFlowProps) {
     setTreatment(k);
     // a dentist picked for the previous treatment may not take this one —
     // drop back to the dentist step instead of showing an empty calendar
-    if (dentist && !dentistsForUI(dentists, k).some((d) => d.slug === dentist)) {
+    if (dentist && !dentistsForUI(dentists, k, group).some((d) => d.slug === dentist)) {
       setDentist(undefined);
       setDate(null);
       setTime(null);
@@ -470,6 +481,27 @@ export function BookingFlow(props: BookingFlowProps) {
     setStep(dentist === undefined ? 2 : 3);
   }
 
+  /** the first answer: kid or adult. A treatment or dentist carried in from
+   *  a link stays only if it fits the group. */
+  function pickGroup(g: AgeGroup) {
+    clearHold();
+    setPickedGroup(g);
+    setDate(null);
+    setTime(null);
+    const t = treatment && dentistsForUI(dentists, treatment, g).length > 0 ? treatment : null;
+    const keepDentist =
+      t && dentist !== undefined && (dentist === null || dentistsForUI(dentists, t, g).some((d) => d.slug === dentist));
+    setTreatment(t);
+    if (!keepDentist) setDentist(undefined);
+    setStep(!t ? 1 : keepDentist ? 3 : 2);
+  }
+
+  /** back to the kid/adult question */
+  function changeGroup() {
+    clearHold();
+    setPickedGroup(null);
+  }
+
   function pickDentist(slug: string | null) {
     clearHold();
     setDentist(slug);
@@ -477,7 +509,8 @@ export function BookingFlow(props: BookingFlowProps) {
   }
 
   const title =
-    step === 1 ? t.booking.step1
+    !resched && group === null ? t.booking.whoTitle
+    : step === 1 ? t.booking.step1
     : step === 2 ? t.booking.step2
     : step === 3 ? t.booking.step3
     : t.booking.contact;
@@ -503,6 +536,7 @@ export function BookingFlow(props: BookingFlowProps) {
         dentistId: dentist ? (dentists.find((d) => d.slug === dentist)?.id ?? null) : null,
         childName: bookName.trim(),
         phone: contactTel,
+        ageGroup: group,
         holdToken: holdToken ?? undefined,
         lineIdToken: line.token ?? undefined,
       });
@@ -572,7 +606,7 @@ export function BookingFlow(props: BookingFlowProps) {
               dentist: dentist ?? null,
               status: "confirmed",
             }}
-            patient={(resched ? movedChild : bookName.trim()) || "–"}
+            patient={`${(resched ? movedChild : bookName.trim()) || "–"}${group ? ` · ${t.booking[group]}` : ""}`}
             dentistName={chosen?.text[lang].name}
             address={props.address[lang]}
           />
@@ -584,6 +618,25 @@ export function BookingFlow(props: BookingFlowProps) {
         </div>
       ) : line.status === "out" ? (
         <LineSignIn onLogin={line.login} />
+      ) : !resched && group === null ? (
+        <>
+          <Eyebrow>{t.booking.whoTitle}</Eyebrow>
+          <p className="hint" style={{ padding: "0 4px 10px" }}>{t.booking.whoSub}</p>
+          <div className="pick">
+            {(["kid", "adult"] as const).map((g) => (
+              <button key={g} type="button" className="pickRow" onClick={() => pickGroup(g)}>
+                <span className={`disc ${g === "kid" ? "t-rose" : "t-lav"}`}>
+                  <ServiceIcon k={g === "kid" ? "babytooth" : "checkup"} size={26} />
+                </span>
+                <span className="pt">
+                  <span className="pn">{t.booking[g]}</span>
+                  <span className="pp">{g === "kid" ? t.booking.kidSub : t.booking.adultSub}</span>
+                </span>
+                <Chevron />
+              </button>
+            ))}
+          </div>
+        </>
       ) : (
         <>
           {resched ? (
@@ -598,6 +651,21 @@ export function BookingFlow(props: BookingFlowProps) {
           ) : (
             <Stepper step={step} onBack={setStep} />
           )}
+
+          {group && !resched ? (
+            <div className="pickedBar">
+              <span className={`disc ${group === "kid" ? "t-rose" : "t-lav"}`}>
+                <ServiceIcon k={group === "kid" ? "babytooth" : "checkup"} size={23} />
+              </span>
+              <span className="pt">
+                <span className="pn">{t.booking[group]}</span>
+                <span className="pp">{group === "kid" ? t.booking.kidSub : t.booking.adultSub}</span>
+              </span>
+              <button type="button" className="changeBtn" onClick={changeGroup}>
+                {t.common.change}
+              </button>
+            </div>
+          ) : null}
 
           {step > 1 && treatment ? (
             <div className="pickedBar">
@@ -637,11 +705,15 @@ export function BookingFlow(props: BookingFlowProps) {
             </div>
           ) : null}
 
+          {step === 1 && !tr.list.some((e) => e.isActive && e.key !== "more" && offered(e.key)) ? (
+            <p className="hint" style={{ padding: "8px 4px" }}>{t.booking.noTreatments}</p>
+          ) : null}
+
           {step === 1 ? (
             <>
-              <Eyebrow>{t.booking.popular}</Eyebrow>
+              {popular.some(offered) ? <Eyebrow>{t.booking.popular}</Eyebrow> : null}
               <div className="grid cols4">
-                {popular.map((k) => (
+                {popular.filter(offered).map((k) => (
                   <button key={k} type="button" className="tile" onClick={() => pickTreatment(k)}>
                     <span className={`disc t-${tr.tint(k)}`}>
                       <ServiceIcon k={tr.icon(k)} size={27} />
@@ -654,7 +726,7 @@ export function BookingFlow(props: BookingFlowProps) {
               <Eyebrow>{t.booking.allGroups}</Eyebrow>
               {iconGroups.map((g) => {
                 // only treatments the clinic shows on the website
-                const items = tr.list.filter((e) => e.isActive && e.group === g && e.key !== "more");
+                const items = tr.list.filter((e) => e.isActive && e.group === g && e.key !== "more" && offered(e.key));
                 if (items.length === 0) return null;
                 return (
                   <div key={g} className="pickGroup">

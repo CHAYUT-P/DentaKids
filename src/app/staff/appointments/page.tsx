@@ -16,6 +16,7 @@ import {
   IconSmartphone,
   IconWalkIn,
 } from "@/components/staff/shell/staffIcons";
+import { AgeTag } from "@/components/staff/shell/AgeTag";
 
 type RangeFilter = "today" | "upcoming" | "past" | "all";
 
@@ -246,6 +247,7 @@ export default function StaffAppointmentsPage() {
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                         <IconPhone size={12} /> {appt.phone}
+                        <AgeTag group={appt.ageGroup} />
                       </div>
                       {appt.lineName ? (
                         <span className="line-tag" title="จองผ่าน LINE">
@@ -429,7 +431,7 @@ function PoolPanel({
       </div>
 
       {pooled.map((a) => {
-        const capable = dentists.filter((d) => d.isActive && canTreat(d.treats, a.treatmentKey));
+        const capable = dentists.filter((d) => d.isActive && canTreat(d.treats, a.treatmentKey, d.treatAges, a.ageGroup));
         const load = liveAt(a.date, a.time);
         return (
           <div

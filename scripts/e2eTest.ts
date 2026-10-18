@@ -86,6 +86,38 @@ async function main() {
   });
   ok("second booking at same slot rejected", !clash.ok && clash.error === "slot_taken");
 
+  console.log("\n— 4b. Kids / adults —");
+  {
+    // naree takes fluoride for kids only: an adult can't book her for it,
+    // a kid can, and "any dentist" for an adult never lands on her
+    const before = (await queries.listDentists()).find((d) => d.slug === "naree")!;
+    const fluorideTreats = [...new Set([...before.treats, "fluoride" as const])];
+    await actions.staffUpdateDentist("naree", { treats: fluorideTreats, treatAges: { fluoride: "kids" } });
+    const naree = (await queries.listDentists()).find((d) => d.slug === "naree")!;
+    ok("dentist setting saved (fluoride: kids only)", naree.treatAges.fluoride === "kids");
+    const forAdults = await queries.capableDentistIds("fluoride", "adult");
+    const forKids = await queries.capableDentistIds("fluoride", "kid");
+    ok("not offered to adults", !forAdults.includes(naree.id));
+    ok("offered to kids", forKids.includes(naree.id));
+    let d2 = addDays(today, 8);
+    while (!(await queries.slotsForDate(d2)).some((r) => r.dentistSlug === "naree" && !r.taken)) d2 = addDays(d2, 1);
+    const t2 = (await queries.slotsForDate(d2)).find((r) => r.dentistSlug === "naree" && !r.taken)!.time;
+    const adultTry = await actions.bookAppointment({
+      date: d2, time: t2, treatmentKey: "fluoride", dentistId: naree.id,
+      childName: "ผู้ใหญ่ทดสอบ", phone: "0911111111", ageGroup: "adult", lineIdToken: FAMILY,
+    });
+    ok("adult booking with a kids-only dentist is refused", !adultTry.ok);
+    const kidTry = await actions.bookAppointment({
+      date: d2, time: t2, treatmentKey: "fluoride", dentistId: naree.id,
+      childName: "เด็กทดสอบ", phone: "0911111111", ageGroup: "kid", lineIdToken: FAMILY,
+    });
+    ok("kid booking with her is accepted", kidTry.ok);
+    const kidRow = (await queries.listAppointmentsBetween(d2, d2)).find((a) => a.ref === kidTry.ref);
+    ok("booking remembers it's for a kid", kidRow?.ageGroup === "kid");
+    if (kidTry.ok) await actions.cancelBooking(kidTry.ref!, FAMILY);
+    await actions.staffUpdateDentist("naree", { treats: before.treats, treatAges: before.treatAges }); // restore
+  }
+
   console.log("\n— 5. Online booking is name + phone only —");
   ok("booking keeps the name given", onStaff?.childName === "น้องเทสเตอร์");
   ok("no guardian/child record created from the patient site", onStaff?.guardianId === null && onStaff?.childId === null);

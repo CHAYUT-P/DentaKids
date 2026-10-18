@@ -2,6 +2,7 @@ import type { Dentist, DentistText, Face } from "@/data/dentists";
 import type { TreatmentKey } from "@/lib/treatments";
 import type { IconKey, Tint } from "@/data/icons";
 import type { DentistDTO } from "@/server/queries";
+import { agesAllow, type AgeGroup, type TreatAges } from "@/lib/ageGroup";
 
 /**
  * DB → UI adapters. The patient-site components render the `Dentist` shape from
@@ -47,6 +48,7 @@ export function toUIDentist(d: DentistDTO): Dentist & { id: number } {
     face: asFace(d.face),
     photo: { small: d.photoSmall, large: d.photoLarge },
     treats: d.treats,
+    treatAges: d.treatAges,
     text: { th: asText(d.text.th), en: asText(d.text.en) },
   };
 }
@@ -58,17 +60,31 @@ export function toUIDentists(list: DentistDTO[]): (Dentist & { id: number })[] {
 /** the routine visits every dentist takes — mirrors data/dentists.ts */
 export const GENERAL_TREATS: IconKey[] = ["checkup", "consult", "followup"];
 
-/** can a dentist with these treats take this treatment? */
-export function canTreat(treats: IconKey[], k: TreatmentKey): boolean {
+/** can a dentist with these treats take this treatment (for this age group)? */
+export function canTreat(
+  treats: IconKey[],
+  k: TreatmentKey,
+  treatAges?: Partial<Record<string, TreatAges>>,
+  group?: AgeGroup | null,
+): boolean {
+  if (!agesAllow(treatAges?.[k], group)) return false;
   if ((GENERAL_TREATS as string[]).includes(k)) return true;
   if ((treats as string[]).includes(k)) return true;
   return false;
 }
 
-/** who can be booked for a treatment, over a DB-driven roster */
-export function dentistsForUI(list: Dentist[], k: TreatmentKey): Dentist[] {
-  if ((GENERAL_TREATS as string[]).includes(k)) return list;
-  // a treatment the clinic added has no claims yet → anyone can take it
-  const able = list.filter((d) => (d.treats as string[]).includes(k));
-  return able.length > 0 ? able : list;
+/**
+ * who can be booked for a treatment, over a DB-driven roster — narrowed to
+ * the dentists who see this age group when one is given. Empty means the
+ * clinic doesn't offer that treatment to that group.
+ */
+export function dentistsForUI<D extends Dentist>(list: D[], k: TreatmentKey, group?: AgeGroup | null): D[] {
+  let able: D[];
+  if ((GENERAL_TREATS as string[]).includes(k)) able = list;
+  else {
+    // a treatment the clinic added has no claims yet → anyone can take it
+    const claimed = list.filter((d) => (d.treats as string[]).includes(k));
+    able = claimed.length > 0 ? claimed : list;
+  }
+  return able.filter((d) => agesAllow(d.treatAges?.[k], group));
 }

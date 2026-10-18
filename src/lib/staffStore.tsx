@@ -412,6 +412,7 @@ export function StaffProvider({
           photoLarge: updates.photo?.large,
           text: updates.text,
           treats: updates.treats,
+          treatAges: updates.treatAges,
           shifts: updates.shifts,
         }),
       );

@@ -1,3 +1,4 @@
+import type { AgeGroup, TreatAges } from "@/lib/ageGroup";
 import type { IconKey } from "@/data/icons";
 import type { TreatmentKey } from "@/lib/treatments";
 
@@ -50,6 +51,8 @@ export interface StaffAppointment {
   createdAt: string;
   /** true when the patient booked for themselves (adult, no child involved) */
   forSelf?: boolean;
+  /** "kid" (under 12) / "adult" as the family picked it online; null = not asked */
+  ageGroup?: AgeGroup | null;
   /** LINE display name of the account that booked online ("" or absent = not via LINE) */
   lineName?: string;
   /** booked from LINE — the desk can message the family from the app */
@@ -70,6 +73,8 @@ export interface EditableDentist {
   face: Record<string, unknown>;
   photo: { small: string; large: string };
   treats: IconKey[];
+  /** per treatment, who they see — "kids" / "adults"; missing = both */
+  treatAges: Partial<Record<string, TreatAges>>;
   text: Record<"th" | "en", {
     name: string;
     title: string;
