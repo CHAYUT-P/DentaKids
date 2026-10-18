@@ -599,13 +599,11 @@ export async function setChairs(n: number): Promise<void> {
     .onConflictDoUpdate({ target: clinicSetting.key, set: { value: chairs, updatedAt: new Date() } });
 }
 
-/** the routine visits every dentist takes — mirrors convert.ts (client copy) */
-const GENERAL_TREATS: IconKey[] = ["checkup", "consult", "followup"];
-
 /**
- * ids of active dentists who take this treatment (routine visits: everyone),
- * narrowed to those who see this age group when one is given — a dentist who
- * takes braces for adults only is not offered for a kid's braces.
+ * ids of active dentists who take this treatment — check-ups and
+ * consultations included, each dentist ticks what they do — narrowed to those
+ * who see this age group when one is given (adults-only braces aren't offered
+ * for a kid).
  */
 export async function capableDentistIds(treatmentKey: TreatmentKey, group?: AgeGroup | null): Promise<number[]> {
   const active = await db
@@ -617,14 +615,9 @@ export async function capableDentistIds(treatmentKey: TreatmentKey, group?: AgeG
     .from(dentistTreat)
     .where(eq(dentistTreat.treatmentKey, treatmentKey));
   const agesOf = new Map(claimed.map((c) => [c.id, isTreatAges(c.ages) ? c.ages : undefined]));
-  let ids: number[];
-  if ((GENERAL_TREATS as string[]).includes(treatmentKey)) {
-    ids = active.map((a) => a.id);
-  } else {
-    const able = active.map((a) => a.id).filter((id) => agesOf.has(id));
-    // a treatment nobody claims yet stays bookable with anyone, like the roster UI
-    ids = able.length > 0 ? able : active.map((a) => a.id);
-  }
+  const able = active.map((a) => a.id).filter((id) => agesOf.has(id));
+  // a treatment nobody claims yet stays bookable with anyone, like the roster UI
+  const ids = able.length > 0 ? able : active.map((a) => a.id);
   return ids.filter((id) => agesAllow(agesOf.get(id), group));
 }
 
@@ -1699,16 +1692,10 @@ export interface DentistUpdate {
   shifts?: { weekday: number; enabled: boolean; start: string; end: string }[];
 }
 
-/**
- * The dentist_treat rows for a treatment scope: every treatment they take,
- * with who they see for it. Routine visits (everyone takes them) only get a
- * row when they're limited to kids or adults.
- */
+/** the dentist_treat rows for a treatment scope: every treatment they take, with who they see for it */
 function treatRows(dentistId: number, treats: IconKey[], treatAges: Partial<Record<string, TreatAges>> = {}) {
   const ages = (k: string): TreatAges => (isTreatAges(treatAges[k]) ? treatAges[k]! : "both");
-  const keys = new Set<string>(treats);
-  for (const k of GENERAL_TREATS) if (ages(k) !== "both") keys.add(k);
-  return [...keys].map((k) => ({ dentistId, treatmentKey: k, ages: ages(k) }));
+  return [...new Set<string>(treats)].map((k) => ({ dentistId, treatmentKey: k, ages: ages(k) }));
 }
 
 export async function updateDentist(slug: string, patch: DentistUpdate): Promise<void> {

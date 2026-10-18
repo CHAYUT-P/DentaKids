@@ -4,7 +4,6 @@ import React, { useMemo, useState } from "react";
 import { useStaff, type EditableDentist, type ShiftHour } from "@/lib/staffStore";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { iconGroups, type IconKey } from "@/data/icons";
-import { GENERAL_TREATS } from "@/lib/convert";
 import { KID_UNDER, TREAT_AGES, TREAT_AGES_TH, type TreatAges } from "@/lib/ageGroup";
 import { dict } from "@/i18n/dict";
 import { resizeImage } from "@/lib/imageResize";
@@ -163,8 +162,7 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
       .filter((x) => x.items.length > 0);
   }, [tr, dentist]);
 
-  const isGeneral = (k: IconKey) => GENERAL_TREATS.includes(k);
-  const takes = (k: IconKey) => isGeneral(k) || treats.includes(k);
+  const takes = (k: IconKey) => treats.includes(k);
   const agesOf = (k: string): TreatAges => treatAges[k] ?? "both";
   const shownOnline = (k: string) => tr.list.find((e) => e.key === k)?.isActive ?? true;
 
@@ -537,14 +535,12 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
                         <div className="de-list">
                           {shown.map((k) => {
                             const on = takes(k);
-                            const general = isGeneral(k);
                             return (
                               <div key={k} className={`de-treat${on ? " on" : ""}`}>
                                 <label className="de-check">
-                                  <input type="checkbox" checked={on} disabled={general} onChange={() => toggleTreat(k)} />
+                                  <input type="checkbox" checked={on} onChange={() => toggleTreat(k)} />
                                   <span className="de-tname">{tr.name(k)}</span>
-                                  {general ? <span className="de-tag">ทุกคนรับ</span> : null}
-                                  {!shownOnline(k) ? <span className="de-tag muted">ไม่เปิดจองออนไลน์</span> : null}
+                                  {!shownOnline(k) ? <span className="de-tag muted">เจ้าหน้าที่ลงนัดเท่านั้น</span> : null}
                                 </label>
                                 {on ? (
                                   <AgesSwitch value={agesOf(k)} onChange={(v) => setAges(k, v)} />

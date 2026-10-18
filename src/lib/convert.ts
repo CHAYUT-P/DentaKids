@@ -57,9 +57,6 @@ export function toUIDentists(list: DentistDTO[]): (Dentist & { id: number })[] {
   return list.map(toUIDentist);
 }
 
-/** the routine visits every dentist takes — mirrors data/dentists.ts */
-export const GENERAL_TREATS: IconKey[] = ["checkup", "consult", "followup"];
-
 /** can a dentist with these treats take this treatment (for this age group)? */
 export function canTreat(
   treats: IconKey[],
@@ -68,9 +65,7 @@ export function canTreat(
   group?: AgeGroup | null,
 ): boolean {
   if (!agesAllow(treatAges?.[k], group)) return false;
-  if ((GENERAL_TREATS as string[]).includes(k)) return true;
-  if ((treats as string[]).includes(k)) return true;
-  return false;
+  return (treats as string[]).includes(k);
 }
 
 /**
@@ -79,12 +74,8 @@ export function canTreat(
  * clinic doesn't offer that treatment to that group.
  */
 export function dentistsForUI<D extends Dentist>(list: D[], k: TreatmentKey, group?: AgeGroup | null): D[] {
-  let able: D[];
-  if ((GENERAL_TREATS as string[]).includes(k)) able = list;
-  else {
-    // a treatment the clinic added has no claims yet → anyone can take it
-    const claimed = list.filter((d) => (d.treats as string[]).includes(k));
-    able = claimed.length > 0 ? claimed : list;
-  }
+  // a treatment nobody has ticked yet → anyone can take it
+  const claimed = list.filter((d) => (d.treats as string[]).includes(k));
+  const able = claimed.length > 0 ? claimed : list;
   return able.filter((d) => agesAllow(d.treatAges?.[k], group));
 }

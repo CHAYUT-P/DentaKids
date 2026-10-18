@@ -104,8 +104,8 @@ async function seedDentists() {
         });
     }
 
-    // treatments this dentist takes
-    for (const k of d.treats) {
+    // treatments this dentist takes — routine visits are ticked like any other
+    for (const k of new Set([...d.treats, "checkup", "consult", "followup"])) {
       await db
         .insert(dentistTreat)
         .values({ dentistId: row.id, treatmentKey: k })

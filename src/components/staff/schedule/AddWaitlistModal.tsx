@@ -82,9 +82,10 @@ export function AddWaitlistModal({ onClose }: AddWaitlistModalProps) {
                   value={treatmentKey}
                   onChange={(e) => setTreatmentKey(e.target.value as IconKey)}
                 >
-                  {/* treatments shown on the website, plus the one already picked */}
+                  {/* every treatment — ones hidden from the website (e.g. follow-ups)
+                      are booked by staff only, and say so */}
                   {tr.list
-                    .filter((t) => t.isActive || t.key === treatmentKey)
+                    .filter((t) => t.key !== "more")
                     .map((t) => (
                       <option key={t.key} value={t.key}>
                         {t.name.th}
