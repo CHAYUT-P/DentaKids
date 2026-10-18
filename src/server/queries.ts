@@ -6,7 +6,7 @@ import type { TreatmentKey } from "@/lib/treatments";
  * only ever runs on the server in the app because only server code imports it.
  */
 
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, type AnyColumn, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 import type { IconKey } from "@/data/icons";
 import { isIconKey } from "@/data/icons";
@@ -211,9 +211,21 @@ function asIconKey(k: string): IconKey {
 
 /* ═══════════════════════════════ dentists ═══════════════════════════════ */
 
+/** an uploaded photo's address (versioned by the last edit), or the stored value as is */
+function photoUrl(slug: string, size: "small" | "large", stored: string, updatedAt: Date): string {
+  return stored === "data:" ? `/api/dentist-photo/${slug}/${size}?v=${updatedAt.getTime()}` : stored;
+}
+
 export async function listDentists(): Promise<DentistDTO[]> {
+  // an uploaded photo (a data URL) never leaves here inline — only a marker,
+  // turned into its /api/dentist-photo address below
+  const photoCol = (c: AnyColumn) =>
+    sql<string>`case when left(${c}, 5) = 'data:' then 'data:' else ${c} end`;
   const [rows, texts, treats, shifts] = await Promise.all([
-    db.select().from(dentist).orderBy(asc(dentist.sort), asc(dentist.id)),
+    db
+      .select({ ...getTableColumns(dentist), photoSmall: photoCol(dentist.photoSmall), photoLarge: photoCol(dentist.photoLarge) })
+      .from(dentist)
+      .orderBy(asc(dentist.sort), asc(dentist.id)),
     db.select().from(dentistText),
     db.select().from(dentistTreat),
     db.select().from(dentistShift).orderBy(asc(dentistShift.weekday)),
@@ -238,8 +250,8 @@ export async function listDentists(): Promise<DentistDTO[]> {
       years: d.years,
       tint: d.tint,
       face: (d.face as Record<string, unknown>) ?? {},
-      photoSmall: d.photoSmall,
-      photoLarge: d.photoLarge,
+      photoSmall: photoUrl(d.slug, "small", d.photoSmall, d.updatedAt),
+      photoLarge: photoUrl(d.slug, "large", d.photoLarge, d.updatedAt),
       isActive: d.isActive,
       treats: treats.filter((t) => t.dentistId === d.id).map((t) => asIconKey(t.treatmentKey)),
       treatAges: Object.fromEntries(
@@ -321,6 +333,7 @@ export interface TreatmentPatch {
   tint?: string | null;
   groupKey?: string | null;
   price?: number | null;
+  showPrice?: boolean;
   isActive?: boolean;
 }
 
@@ -333,8 +346,14 @@ export async function updateTreatment(key: string, patch: TreatmentPatch): Promi
   if (patch.tint !== undefined) set.tint = patch.tint;
   if (patch.groupKey !== undefined) set.groupKey = patch.groupKey;
   if (patch.price !== undefined) set.price = patch.price;
+  if (patch.showPrice !== undefined) set.showPrice = patch.showPrice;
   if (patch.isActive !== undefined) set.isActive = patch.isActive;
   await db.update(treatment).set(set).where(eq(treatment.key, key));
+}
+
+/** show or hide every price on the patient site in one go */
+export async function setAllShowPrice(show: boolean): Promise<void> {
+  await db.update(treatment).set({ showPrice: show, updatedAt: new Date() });
 }
 
 /** can a family book this right now? It must exist and be shown on the website */
@@ -1747,6 +1766,8 @@ export interface NewDentistInput {
   treats: IconKey[];
   treatAges?: Partial<Record<string, TreatAges>>;
   shifts: { weekday: number; enabled: boolean; start: string; end: string }[];
+  photoSmall?: string;
+  photoLarge?: string;
 }
 
 export async function createDentist(input: NewDentistInput): Promise<void> {
@@ -1759,6 +1780,8 @@ export async function createDentist(input: NewDentistInput): Promise<void> {
       years: input.years,
       tint: input.tint,
       face: {},
+      photoSmall: input.photoSmall ?? "",
+      photoLarge: input.photoLarge ?? "",
       isActive: true,
       sort,
     })

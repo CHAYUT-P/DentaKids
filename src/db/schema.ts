@@ -136,6 +136,8 @@ export const treatment = pgTable(
     groupKey: text("group_key"),
     /** baht; null = quoted at the visit; 0 = included with the visit */
     price: integer("price"),
+    /** false = the price stays off the patient site (the treatment can still show) */
+    showPrice: boolean("show_price").notNull().default(true),
     durationMin: integer("duration_min").notNull().default(30),
     /** false = hidden from the patient site (still shown on old bookings) */
     isActive: boolean("is_active").notNull().default(true),

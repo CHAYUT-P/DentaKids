@@ -102,6 +102,7 @@ const OPS: Record<string, (...args: never[]) => Promise<unknown>> = {
   removeDfRule: actions.staffRemoveDfRule,
   removeDentistLeave: actions.staffRemoveDentistLeave,
   updateTreatment: actions.staffUpdateTreatment,
+  setAllShowPrice: actions.staffSetAllShowPrice,
   updateDay: actions.staffUpdateDay,
   updateClinicInfo: actions.staffUpdateClinicInfo,
   addHoliday: actions.staffAddHoliday,

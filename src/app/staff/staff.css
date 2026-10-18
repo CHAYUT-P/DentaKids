@@ -7004,3 +7004,52 @@ label.btn-primary-staff.disabled {
 .move-notify { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
 .move-notify input { width: 18px; height: 18px; accent-color: var(--staff-primary); }
 .move-note { margin: 0; font-size: 13.5px; color: var(--staff-ink-muted); }
+
+/* ── บริการ & ราคา: show or hide prices on the patient site ─────────────── */
+.svc-price { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.svc-price-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--staff-ink-muted);
+  cursor: pointer;
+}
+.svc-price-show input { width: 15px; height: 15px; accent-color: var(--staff-primary); }
+.svc-price-all { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--staff-ink-muted); }
+.svc-price-all .btn-secondary-staff:disabled { opacity: 0.45; cursor: default; }
+
+/* dentist photos — small (square) and large (portrait) */
+.de-avatar { overflow: hidden; }
+.de-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.de-photos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--staff-border);
+  background: var(--staff-surface-subtle);
+}
+.de-photo { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.de-photo-k { font-size: 14px; font-weight: 500; color: var(--staff-ink); }
+.de-photo p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--staff-ink-muted); }
+.de-photo-box {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #fff;
+  border: 1px dashed var(--staff-border-strong);
+  color: var(--staff-ink-muted);
+  font-size: 13px;
+}
+.de-photo-box img { width: 100%; height: 100%; object-fit: cover; }
+.de-photo-box.small { width: 104px; height: 104px; border-radius: 50%; font-family: var(--staff-font-display); font-size: 34px; }
+.de-photo-box.large { width: 132px; height: 176px; border-radius: 12px; }
+.de-photo-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.de-photo-btns label { cursor: pointer; }
+.de-photo-busy { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--staff-ink-muted); }
+
+/* dentist list: the real photo when there is one */
+.doc-avatar { overflow: hidden; }
+.doc-avatar img { width: 100%; height: 100%; object-fit: cover; }

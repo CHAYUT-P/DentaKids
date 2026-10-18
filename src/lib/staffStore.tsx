@@ -41,6 +41,7 @@ import {
   staffRemoveDentistLeave,
   staffMessageFamily,
   staffUpdateTreatment,
+  staffSetAllShowPrice,
   staffBootstrap,
   staffUpsertPatient,
   type FamilyMessageResult,
@@ -155,6 +156,8 @@ export interface StaffContextType {
   /** is this dentist on leave on this date? */
   onLeave: (dentistSlug: string, date: string) => DentistLeave | undefined;
   updateTreatment: (key: string, patch: Parameters<typeof staffUpdateTreatment>[1]) => void;
+  /** show or hide every price on the patient site */
+  setAllShowPrice: (show: boolean) => void;
   updateDayOpen: (day: ClinicDaySetting["day"], isOpen: boolean) => void;
   updateDayTime: (day: ClinicDaySetting["day"], field: "start" | "end", val: string) => void;
   addHoliday: (start: string, end: string, name: string) => void;
@@ -647,11 +650,20 @@ export function StaffProvider({
                 ...t,
                 ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
                 ...(patch.price !== undefined ? { price: patch.price } : {}),
+                ...(patch.showPrice !== undefined ? { showPrice: patch.showPrice } : {}),
               }
             : t,
         ),
       }));
       void mutate("บันทึกบริการ", () => staffUpdateTreatment(key, patch));
+    },
+    [mutate],
+  );
+
+  const setAllShowPrice = useCallback(
+    (show: boolean) => {
+      setState((s) => ({ ...s, treatments: s.treatments.map((t) => ({ ...t, showPrice: show })) }));
+      void mutate(show ? "แสดงราคาทั้งหมด" : "ซ่อนราคาทั้งหมด", () => staffSetAllShowPrice(show));
     },
     [mutate],
   );
@@ -776,6 +788,7 @@ export function StaffProvider({
       onLeave,
       createTreatment,
       updateTreatment,
+      setAllShowPrice,
       updateDayOpen,
       updateDayTime,
       addHoliday,
@@ -793,7 +806,7 @@ export function StaffProvider({
       today, state, toast, showToast, walkinOpen, syncing,
       createAppointment, updateAppointment, updateStatus, setQueueStatus, rescheduleAppointment, messageFamily,
       deleteAppointment, updateDentist, createDentist, createPatient, updatePatient, addPatientChild,
-      addWaitlist, updateWaitlistStatus, assignWaitingDentist, removeWaitlist, updateServicePrice, createTreatment, updateTreatment, addDentistLeave, removeDentistLeave, onLeave,
+      addWaitlist, updateWaitlistStatus, assignWaitingDentist, removeWaitlist, updateServicePrice, createTreatment, updateTreatment, setAllShowPrice, addDentistLeave, removeDentistLeave, onLeave,
       saveVisitRecord, finishVisit, refresh,
       updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, assignDentist,
       markAllNotificationsRead, simulateOnlineBooking,

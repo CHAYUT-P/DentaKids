@@ -62,7 +62,8 @@ export default function StaffDentistsPage() {
             <div key={d.slug} className={`ledger-row doc-grid ${d.isActive ? "" : "inactive"}`} role="row">
               <div className="doc-who" role="cell">
                 <span className={`doc-avatar tint-${d.isActive ? d.tint : "off"}`} aria-hidden="true">
-                  {d.text.th.name.split(" ")[1]?.[0] || "ท"}
+                  {/* eslint-disable-next-line @next/next/no-img-element -- shared with the desktop app, which has no next/image */}
+                  {d.photo.small ? <img src={d.photo.small} alt="" /> : d.text.th.name.split(" ")[1]?.[0] || "ท"}
                 </span>
                 <span className="doc-text">
                   <span className="doc-name">{d.text.th.name}</span>

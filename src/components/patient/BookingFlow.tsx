@@ -434,8 +434,10 @@ export function BookingFlow(props: BookingFlowProps) {
     return { morning: cut(0, 720), afternoon: cut(720, 1440) };
   }, [date, dentist, slots, load, chairs, roster, today, nowMin]);
 
-  /* the compact price under a treatment name — from the clinic's treatment list */
+  /* the compact price under a treatment name — from the clinic's treatment
+     list; "" when the clinic hides that price */
   const priceShort = (k: TreatmentKey) => {
+    if (tr.get(k).showPrice === false) return "";
     const p = tr.get(k).price;
     if (p === null) return t.common.quote;
     if (p === 0) return t.common.free;
@@ -674,7 +676,7 @@ export function BookingFlow(props: BookingFlowProps) {
               </span>
               <span className="pt">
                 <span className="pn">{tr.name(treatment, lang)}</span>
-                <span className="pp">{priceShort(treatment)}</span>
+                {priceShort(treatment) ? <span className="pp">{priceShort(treatment)}</span> : null}
               </span>
               {resched ? null : (
                 <button type="button" className="changeBtn" onClick={() => setStep(1)}>

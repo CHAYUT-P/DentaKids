@@ -18,7 +18,7 @@ type Show = "all" | "on" | "off";
  * บริการ" adds a new one that can reuse any icon.
  */
 export default function StaffServicesPage() {
-  const { treatments: all, updateTreatment } = useStaff();
+  const { treatments: all, updateTreatment, setAllShowPrice } = useStaff();
   // "more" is the home page's see-all tile, not a treatment anyone books
   const treatments = useMemo(() => all.filter((t) => t.key !== "more"), [all]);
   const dict = useT();
@@ -40,6 +40,9 @@ export default function StaffServicesPage() {
   }, [treatments, search, show]);
 
   const onCount = treatments.filter((t) => t.isActive).length;
+  /** absent (older server) counts as shown */
+  const priceShown = (t: TreatmentInfo) => t.showPrice !== false;
+  const priceOnCount = treatments.filter(priceShown).length;
 
   const startPrice = (t: TreatmentInfo) => {
     setEditingPrice(t.key);
@@ -62,7 +65,8 @@ export default function StaffServicesPage() {
         <div>
           <h2>บริการ &amp; ราคา</h2>
           <p>
-            แสดงบนเว็บ {onCount} จาก {treatments.length} บริการ · แก้แล้วหน้าเว็บคนไข้อัปเดตทันที
+            แสดงบนเว็บ {onCount} จาก {treatments.length} บริการ · แสดงราคา {priceOnCount} รายการ ·
+            แก้แล้วหน้าเว็บคนไข้อัปเดตทันที
           </p>
         </div>
         <button type="button" className="btn-secondary-staff btn-lg" onClick={() => setModal("new")}>
@@ -81,6 +85,25 @@ export default function StaffServicesPage() {
           </button>
           <button type="button" className={`staff-pill-btn ${show === "off" ? "active" : ""}`} onClick={() => setShow("off")}>
             ซ่อนอยู่
+          </button>
+        </div>
+        <div className="svc-price-all" role="group" aria-label="ราคาบนเว็บคนไข้">
+          <span>ราคาบนเว็บ:</span>
+          <button
+            type="button"
+            className="btn-secondary-staff"
+            disabled={priceOnCount === treatments.length}
+            onClick={() => setAllShowPrice(true)}
+          >
+            แสดงทั้งหมด
+          </button>
+          <button
+            type="button"
+            className="btn-secondary-staff"
+            disabled={priceOnCount === 0}
+            onClick={() => setAllShowPrice(false)}
+          >
+            ซ่อนทั้งหมด
           </button>
         </div>
         <div className="staff-search-box" style={{ width: "300px" }}>
@@ -148,6 +171,14 @@ export default function StaffServicesPage() {
                         {priceText(t.price)}
                       </button>
                     )}
+                    <label className="svc-price-show" title="แสดงราคานี้บนเว็บคนไข้หรือไม่">
+                      <input
+                        type="checkbox"
+                        checked={priceShown(t)}
+                        onChange={(e) => updateTreatment(t.key, { showPrice: e.target.checked })}
+                      />
+                      <span>{priceShown(t) ? "แสดงราคาบนเว็บ" : "ซ่อนราคา"}</span>
+                    </label>
                   </span>
 
                   <label className="svc-switch" title={t.isActive ? "แสดงบนเว็บคนไข้" : "ซ่อนจากเว็บคนไข้"}>

@@ -21,6 +21,8 @@ export interface TreatmentInfo {
   name: Record<Lang, string>;
   /** baht; null = quoted at the visit; 0 = included */
   price: number | null;
+  /** false = the patient site doesn't show this price */
+  showPrice: boolean;
   durationMin: number;
   /** false = hidden from the patient site */
   isActive: boolean;
@@ -38,6 +40,8 @@ export interface TreatmentRow {
   tint: string | null;
   groupKey: string | null;
   price: number | null;
+  /** absent on rows read before the column existed — shown */
+  showPrice?: boolean;
   durationMin: number;
   isActive: boolean;
   sort: number;
@@ -66,6 +70,7 @@ export function toTreatmentInfo(r: TreatmentRow): TreatmentInfo {
       en: r.nameEn || (builtIn ? dict.en.service[r.key as IconKey] : "") || r.nameTh || r.key,
     },
     price: r.price,
+    showPrice: r.showPrice ?? true,
     durationMin: r.durationMin,
     isActive: r.isActive,
     sort: r.sort,

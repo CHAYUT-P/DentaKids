@@ -140,8 +140,15 @@ export interface StaffBootstrap {
 
 /* ── reads ──────────────────────────────────────────────────────────────── */
 
-export function staffBootstrap() {
-  return call<StaffBootstrap>("bootstrap");
+export async function staffBootstrap() {
+  const b = await call<StaffBootstrap>("bootstrap");
+  // uploaded photos come back as site paths ("/api/dentist-photo/…") — this
+  // app runs on its own origin, so point them at the server
+  const abs = (u: string) => (u?.startsWith("/") ? `${API}${u}` : u);
+  if (Array.isArray(b?.dentists)) {
+    b.dentists = b.dentists.map((d) => ({ ...d, photo: { small: abs(d.photo?.small), large: abs(d.photo?.large) } }));
+  }
+  return b;
 }
 export function staffPrices() {
   return call<Record<IconKey, number | null>>("prices");
@@ -584,10 +591,15 @@ export function staffUpdateTreatment(
     tint?: string | null;
     groupKey?: string | null;
     price?: number | null;
+    showPrice?: boolean;
     isActive?: boolean;
   },
 ) {
   return call<void>("updateTreatment", [key, patch]);
+}
+
+export function staffSetAllShowPrice(show: boolean) {
+  return call<void>("setAllShowPrice", [show]);
 }
 
 export function staffUpdateDay<T extends object>(day: string, patch: T) {

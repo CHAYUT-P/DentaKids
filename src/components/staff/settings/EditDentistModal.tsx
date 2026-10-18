@@ -7,13 +7,15 @@ import { iconGroups, type IconKey } from "@/data/icons";
 import { GENERAL_TREATS } from "@/lib/convert";
 import { KID_UNDER, TREAT_AGES, TREAT_AGES_TH, type TreatAges } from "@/lib/ageGroup";
 import { dict } from "@/i18n/dict";
+import { resizeImage } from "@/lib/imageResize";
 import { IconX, IconCheck } from "@/components/staff/shell/staffIcons";
 
 /**
  * The dentist editor — a roomy sheet with three tabs instead of one long
  * cramped form:
  *
- *   ข้อมูลทั่วไป   name, specialty, intro, years, card colour, taking bookings
+ *   ข้อมูลทั่วไป   photos (small + large), name, specialty, intro, years,
+ *                   card colour, taking bookings
  *   การรักษาที่รับ  every treatment, grouped; tick what they do and pick who
  *                   they see for it (kids / both / adults) on the same row
  *   วันเวลาเข้าเวร  the weekly shift, one row per day
@@ -103,6 +105,44 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
   const [enTitle, setEnTitle] = useState(dentist?.text.en.title ?? "");
   const [thBlurb, setThBlurb] = useState(dentist?.text.th.blurb ?? "");
   const [isActive, setIsActive] = useState(dentist?.isActive ?? true);
+  /** current photo addresses, or freshly resized data URLs once replaced */
+  const [photoSmall, setPhotoSmall] = useState(dentist?.photo.small ?? "");
+  const [photoLarge, setPhotoLarge] = useState(dentist?.photo.large ?? "");
+  const [photoChanged, setPhotoChanged] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  /** read, shrink and stage a picked photo; a first large photo also makes the small one */
+  const pickPhoto = async (file: File | undefined, which: "small" | "large") => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("กรุณาเลือกไฟล์รูปภาพ (JPG หรือ PNG)");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setError("ไฟล์ใหญ่เกินไป (เกิน 20 MB)");
+      return;
+    }
+    setError(null);
+    setPhotoBusy(true);
+    try {
+      if (which === "small") {
+        setPhotoSmall(await resizeImage(file, "square"));
+      } else {
+        setPhotoLarge(await resizeImage(file, "portrait"));
+        if (!photoSmall) setPhotoSmall(await resizeImage(file, "square"));
+      }
+      setPhotoChanged(true);
+    } catch {
+      setError("เปิดรูปนี้ไม่ได้ ลองไฟล์อื่น");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+  const removePhoto = (which: "small" | "large") => {
+    if (which === "small") setPhotoSmall("");
+    else setPhotoLarge("");
+    setPhotoChanged(true);
+  };
   const [shifts, setShifts] = useState<ShiftHour[]>(dentist?.shifts ?? defaultShifts());
   const [treats, setTreats] = useState<IconKey[]>(dentist?.treats ?? []);
   /** per treatment: kids only / both / adults only — missing means both */
@@ -193,6 +233,8 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
         treats,
         treatAges,
         shifts,
+        photoSmall,
+        photoLarge,
         text: {
           th: {
             name: thName,
@@ -225,6 +267,8 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
       shifts,
       treats,
       treatAges,
+      // only a changed photo travels — an unchanged one is just its address
+      ...(photoChanged ? { photo: { small: photoSmall, large: photoLarge } } : {}),
       text: {
         ...dentist.text,
         th: {
@@ -253,7 +297,8 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
           {/* who this is, and whether they take bookings at all */}
           <div className="de-head">
             <span className="de-avatar" style={{ background: TINT_HEX[tint] ?? TINT_HEX.lav }} aria-hidden="true">
-              {initial}
+              {/* eslint-disable-next-line @next/next/no-img-element -- shared with the desktop app, which has no next/image */}
+              {photoSmall ? <img src={photoSmall} alt="" /> : initial}
             </span>
             <div className="de-title">
               <h3>{isNew ? "เพิ่มทันตแพทย์ใหม่" : thName || "ทันตแพทย์"}</h3>
@@ -292,6 +337,64 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
 
               {tab === "profile" ? (
                 <div className="de-section">
+                  <div className="de-photos">
+                    <div className="de-photo">
+                      <span className="de-photo-k">รูปเล็ก</span>
+                      <div className="de-photo-box small">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- shared with the desktop app, which has no next/image */}
+                        {photoSmall ? <img src={photoSmall} alt="รูปเล็ก" /> : <span>{initial}</span>}
+                      </div>
+                      <p>แสดงในรายชื่อคุณหมอและตอนจอง · ครอปเป็นรูปสี่เหลี่ยมจัตุรัสให้อัตโนมัติ</p>
+                      <div className="de-photo-btns">
+                        <label className="btn-secondary-staff">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            hidden
+                            onChange={(e) => {
+                              void pickPhoto(e.target.files?.[0], "small");
+                              e.target.value = "";
+                            }}
+                          />
+                          {photoSmall ? "เปลี่ยนรูป" : "อัปโหลดรูป"}
+                        </label>
+                        {photoSmall ? (
+                          <button type="button" className="btn-secondary-staff" onClick={() => removePhoto("small")}>
+                            ลบรูป
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="de-photo">
+                      <span className="de-photo-k">รูปใหญ่</span>
+                      <div className="de-photo-box large">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- shared with the desktop app, which has no next/image */}
+                        {photoLarge ? <img src={photoLarge} alt="รูปใหญ่" /> : <span>ยังไม่มีรูป</span>}
+                      </div>
+                      <p>แสดงในหน้าประวัติคุณหมอ · แนะนำรูปแนวตั้ง ครึ่งตัว</p>
+                      <div className="de-photo-btns">
+                        <label className="btn-secondary-staff">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            hidden
+                            onChange={(e) => {
+                              void pickPhoto(e.target.files?.[0], "large");
+                              e.target.value = "";
+                            }}
+                          />
+                          {photoLarge ? "เปลี่ยนรูป" : "อัปโหลดรูป"}
+                        </label>
+                        {photoLarge ? (
+                          <button type="button" className="btn-secondary-staff" onClick={() => removePhoto("large")}>
+                            ลบรูป
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {photoBusy ? <p className="de-photo-busy">กำลังย่อรูป…</p> : null}
+                  </div>
+
                   <div className="form-row-2">
                     <div className="form-group">
                       <label>ชื่อ-นามสกุล (ภาษาไทย) *</label>
@@ -521,7 +624,7 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
             <button type="button" className="btn-secondary-staff" onClick={onClose}>
               ยกเลิก
             </button>
-            <button type="submit" className="btn-primary-staff">
+            <button type="submit" className="btn-primary-staff" disabled={photoBusy}>
               <IconCheck size={16} />
               <span>{isNew ? "เพิ่มทันตแพทย์" : "บันทึก"}</span>
             </button>

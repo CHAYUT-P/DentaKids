@@ -18,7 +18,10 @@ import { ServiceIcon } from "@/components/shared/serviceIcons";
 export function ServicesPage({ treatments }: { treatments: TreatmentInfo[] }) {
   const { t, lang } = useLang();
 
-  const priceShort = (p: number | null) => {
+  /** "" when the clinic hides this price — the row then shows the name only */
+  const priceShort = (e: TreatmentInfo) => {
+    if (e.showPrice === false) return "";
+    const p = e.price;
     if (p === null) return t.common.quote;
     if (p === 0) return t.common.free;
     return `${p.toLocaleString("en-US")} ${t.common.baht}`;
@@ -26,7 +29,7 @@ export function ServicesPage({ treatments }: { treatments: TreatmentInfo[] }) {
 
   return (
     <Screen title={t.nav.services} back="/">
-      <Lead>{t.servicesPage.lead}</Lead>
+      {treatments.some((e) => e.showPrice !== false) ? <Lead>{t.servicesPage.lead}</Lead> : null}
       {iconGroups.map((g) => {
         const items = treatments.filter((e) => e.group === g && e.key !== "more");
         if (items.length === 0) return null;
@@ -41,7 +44,7 @@ export function ServicesPage({ treatments }: { treatments: TreatmentInfo[] }) {
                   </span>
                   <span className="pt">
                     <span className="pn">{e.name[lang]}</span>
-                    <span className="pp">{priceShort(e.price)}</span>
+                    {priceShort(e) ? <span className="pp">{priceShort(e)}</span> : null}
                   </span>
                   <Chevron />
                 </Link>

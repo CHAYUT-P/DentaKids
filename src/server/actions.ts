@@ -654,15 +654,38 @@ export async function staffDeleteAppointment(id: number) {
 
 /* ═══════════════════════════ staff: dentists ════════════════════════════ */
 
+/**
+ * A dentist photo as the staff app sends it: "" clears it, an image data URL
+ * (resized in the browser) replaces it. Anything else — notably the photo's
+ * own /api/dentist-photo address echoed back unchanged — means "leave as is".
+ */
+const MAX_PHOTO_CHARS = 3_000_000; // ~2 MB of image
+function photoPatch(v: string | undefined): string | undefined {
+  if (v === "") return "";
+  if (typeof v === "string" && v.length <= MAX_PHOTO_CHARS && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) return v;
+  return undefined;
+}
+
 export async function staffUpdateDentist(slug: string, patch: DentistUpdate) {
   await guard();
-  await updateDentist(slug, patch);
+  const { photoSmall, photoLarge, ...rest } = patch;
+  const small = photoPatch(photoSmall);
+  const large = photoPatch(photoLarge);
+  await updateDentist(slug, {
+    ...rest,
+    ...(small !== undefined ? { photoSmall: small } : {}),
+    ...(large !== undefined ? { photoLarge: large } : {}),
+  });
   revalidateAll();
 }
 
 export async function staffCreateDentist(input: NewDentistInput) {
   await guard();
-  await createDentist(input);
+  await createDentist({
+    ...input,
+    photoSmall: photoPatch(input.photoSmall) ?? "",
+    photoLarge: photoPatch(input.photoLarge) ?? "",
+  });
   revalidateAll();
 }
 
@@ -1267,6 +1290,14 @@ export async function staffCreateTreatment(input: {
 }
 
 /** edit a treatment's name / icon / colour / group / price, or show-hide it on the website */
+/** show or hide every price on the patient site at once */
+export async function staffSetAllShowPrice(show: boolean) {
+  await guard();
+  const { setAllShowPrice } = await import("@/server/queries");
+  await setAllShowPrice(show === true);
+  revalidateAll();
+}
+
 export async function staffUpdateTreatment(
   key: string,
   patch: {
@@ -1276,6 +1307,7 @@ export async function staffUpdateTreatment(
     tint?: string | null;
     groupKey?: string | null;
     price?: number | null;
+    showPrice?: boolean;
     isActive?: boolean;
   },
 ) {
