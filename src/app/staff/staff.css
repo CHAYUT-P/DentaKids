@@ -7053,3 +7053,36 @@ label.btn-primary-staff.disabled {
 /* dentist list: the real photo when there is one */
 .doc-avatar { overflow: hidden; }
 .doc-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+/* treatment length: 30 min / 1 h / … — a long one holds several booking slots */
+.tm-durations { display: flex; flex-wrap: wrap; gap: 8px; }
+.tm-hint { font-size: 12.5px; color: var(--staff-ink-muted); }
+.svc-badge.long { background: #e6e9fb; color: #4a54a8; }
+
+/* a 1-hour (or longer) booking: its range on the chip, and the half-hours
+   after it shown as held */
+.appt-long {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #e6e9fb;
+  color: #4a54a8;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.appt-cover {
+  flex: 1;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 7px;
+  border: 1px dashed #b9b2d6;
+  background: repeating-linear-gradient(135deg, #f4f1fa 0 8px, #ece7f6 8px 16px);
+  color: var(--staff-ink-2);
+  font-size: 12.5px;
+  text-align: left;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.appt-cover.cancelled { opacity: 0.5; }
+.booking-clash { margin-right: auto; font-size: 13px; color: #c92a2a; }
+.booking-long { margin-right: auto; font-size: 13px; color: var(--staff-ink-muted); }

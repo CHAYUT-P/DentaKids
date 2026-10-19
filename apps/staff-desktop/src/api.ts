@@ -578,6 +578,7 @@ export function staffCreateTreatment(input: {
   tint?: string;
   groupKey?: string;
   price: number | null;
+  durationMin?: number;
 }) {
   return call<{ ok: boolean; key?: string }>("createTreatment", [input]);
 }
@@ -592,6 +593,7 @@ export function staffUpdateTreatment(
     groupKey?: string | null;
     price?: number | null;
     showPrice?: boolean;
+    durationMin?: number;
     isActive?: boolean;
   },
 ) {

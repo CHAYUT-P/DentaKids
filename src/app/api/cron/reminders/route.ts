@@ -4,6 +4,7 @@ import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointment, guardian, messageLog } from "@/db/schema";
 import { addDays, thaiDate, todayISO } from "@/lib/dates";
+import { timeRange } from "@/lib/slots";
 import { pushLineText } from "@/server/line";
 
 /**
@@ -28,10 +29,11 @@ const KINDS: Record<string, Kind> = {
   morning: "reminder_morning",
 };
 
-function text(kind: Kind, a: { ref: string; childName: string; date: string; time: string }) {
+function text(kind: Kind, a: { ref: string; childName: string; date: string; time: string; durationMin: number }) {
+  const when = timeRange(a.time, a.durationMin);
   return kind === "reminder_day_before"
-    ? `เตือนนัดหมายค่ะ 🦷\nพรุ่งนี้ ${thaiDate(a.date)} เวลา ${a.time} มีนัดของ ${a.childName} นะคะ\nแจ้งชื่อนี้ที่เคาน์เตอร์เมื่อมาถึงได้เลย\nรหัสจอง: ${a.ref}`
-    : `วันนี้มีนัดนะคะ ⏰\nนัดของ ${a.childName} เวลา ${a.time} — แวะมาสักเล็กน้อยก่อนเวลาได้เลยค่ะ\nรหัสจอง: ${a.ref}`;
+    ? `เตือนนัดหมายค่ะ 🦷\nพรุ่งนี้ ${thaiDate(a.date)} เวลา ${when} น. มีนัดของ ${a.childName} นะคะ\nแจ้งชื่อนี้ที่เคาน์เตอร์เมื่อมาถึงได้เลย\nรหัสจอง: ${a.ref}`
+    : `วันนี้มีนัดนะคะ ⏰\nนัดของ ${a.childName} เวลา ${when} น. — แวะมาสักเล็กน้อยก่อนเวลาได้เลยค่ะ\nรหัสจอง: ${a.ref}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -54,6 +56,7 @@ export async function GET(request: NextRequest) {
       childName: appointment.childName,
       date: appointment.date,
       time: appointment.time,
+      durationMin: appointment.durationMin,
       lineUserId: sql<string | null>`coalesce(${appointment.lineUserId}, ${guardian.lineUserId})`,
     })
     .from(appointment)

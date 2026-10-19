@@ -23,6 +23,7 @@ import {
 import { dentistsForUI } from "@/lib/convert";
 import { useLine } from "@/lib/useLine";
 import { isAgeGroup, type AgeGroup } from "@/lib/ageGroup";
+import { coveredTimes, durationTh, slotsNeeded, timeRange } from "@/lib/slots";
 import { bookAppointment, holdSlot, releaseSlotHold, rescheduleBooking } from "@/server/actions";
 import type { SlotRow } from "@/server/queries";
 import { Check, Chevron, ChevronLeft } from "@/components/shared/icons";
@@ -227,6 +228,35 @@ function SlotBank({
     </>
   );
 }
+/**
+ * The start times one day offers for a booking `durationMin` long. A 1-hour
+ * treatment needs every half-hour it runs into: 10:00 only shows when 10:00
+ * AND 10:30 are free — so a taken 10:30 also takes away 10:00.
+ *   named dentist — that dentist is on shift and free for all of it
+ *   any dentist   — the chairs have room for all of it, and one capable
+ *                   dentist is on shift for all of it (the booking may wait
+ *                   in the pool for them)
+ */
+function startTimes(
+  rows: SlotRow[],
+  dayLoad: Record<string, { live: number; pool: number }>,
+  chairs: number,
+  dentist: string | null,
+  capable: Set<string>,
+  durationMin: number,
+  gone: (hhmm: string) => boolean,
+): string[] {
+  const has = (slug: string, t: string, free: boolean) =>
+    rows.some((r) => r.dentistSlug === slug && r.time === t && (!free || !r.taken));
+  return [...new Set(rows.map((r) => r.time))].sort().filter((t0) => {
+    if (gone(t0)) return false;
+    const need = coveredTimes(t0, durationMin);
+    if (dentist) return need.every((t) => has(dentist, t, true));
+    if (need.some((t) => (dayLoad[t]?.live ?? 0) >= chairs)) return false;
+    return [...capable].some((slug) => need.every((t) => has(slug, t, false)));
+  });
+}
+
 /* ═══════════════════════════════ the day calendar ═══════════════════════ */
 
 function DayCalendar({
@@ -240,6 +270,7 @@ function DayCalendar({
   capable,
   load,
   chairs,
+  durationMin,
 }: {
   today: string;
   date: string | null;
@@ -253,6 +284,8 @@ function DayCalendar({
   capable: Set<string>;
   load: Record<string, Record<string, { live: number; pool: number }>>;
   chairs: number;
+  /** the picked treatment's length — a long one needs room for all of it */
+  durationMin: number;
 }) {
   const { t, lang } = useLang();
   const lastDay = addDays(today, WINDOW_DAYS - 1);
@@ -316,11 +349,7 @@ function DayCalendar({
           const off = !out && !closed && mine.length === 0;
           const full =
             !out && !closed && !off &&
-            (dentist !== null
-              ? mine.every((s) => s.taken)
-              : [...new Set(mine.map((s) => s.time))].every(
-                  (hhmm) => (dayLoad[hhmm]?.live ?? 0) >= chairs,
-                ));
+            startTimes(daySlots, dayLoad, chairs, dentist, capable, durationMin, () => false).length === 0;
           return (
             <button
               key={iso}
@@ -397,6 +426,8 @@ export function BookingFlow(props: BookingFlowProps) {
 
   const chosen = dentist ? dentists.find((d) => d.slug === dentist) : undefined;
   const roster = treatment ? dentistsForUI(dentists, treatment, group) : dentists;
+  /** the picked treatment's length — a 1-hour one holds two half-hour slots */
+  const durationMin = treatment ? tr.get(treatment).durationMin : 30;
   /** treatments some dentist offers to this group — the rest aren't shown */
   const offered = (k: TreatmentKey) => dentistsForUI(dentists, k, group).length > 0;
   /** slugs able to do the picked treatment — bounds the calendar in "any" mode */
@@ -408,31 +439,12 @@ export function BookingFlow(props: BookingFlowProps) {
      just means the booking waits in the pool for a cancellation) */
   const daySlots = useMemo(() => {
     if (!date) return { morning: [] as string[], afternoon: [] as string[] };
-    const rows = slots[date] ?? [];
-    const dayLoad: Record<string, { live: number; pool: number }> = load[date] ?? {};
     const gone = (hhmm: string) => date === today && minutesOf(hhmm) < nowMin + LEAD;
-    const free = (r: SlotRow) => !r.taken && !gone(r.time);
-    if (dentist) {
-      const relevant = rows.filter((r) => r.dentistSlug === dentist);
-      const bank = (from: number, to: number) =>
-        [...new Set(relevant.filter((r) => minutesOf(r.time) >= from && minutesOf(r.time) < to).map((r) => r.time))]
-          .filter((hhmm) => {
-            const row = relevant.find((r) => r.time === hhmm);
-            return row ? free(row) : false;
-          })
-          .sort();
-      return { morning: bank(0, 720), afternoon: bank(720, 1440) };
-    }
-    const capable = new Set(roster.map((d) => d.slug));
-    const times = [...new Set(rows.map((r) => r.time))].filter((hhmm) => {
-      if (gone(hhmm)) return false;
-      if ((dayLoad[hhmm]?.live ?? 0) >= chairs) return false;
-      return rows.some((r) => r.time === hhmm && capable.has(r.dentistSlug));
-    }).sort();
+    const times = startTimes(slots[date] ?? [], load[date] ?? {}, chairs, dentist ?? null, capable, durationMin, gone);
     const cut = (from: number, to: number) =>
       times.filter((hhmm) => minutesOf(hhmm) >= from && minutesOf(hhmm) < to);
     return { morning: cut(0, 720), afternoon: cut(720, 1440) };
-  }, [date, dentist, slots, load, chairs, roster, today, nowMin]);
+  }, [date, dentist, slots, load, chairs, capable, durationMin, today, nowMin]);
 
   /* the compact price under a treatment name — from the clinic's treatment
      list; "" when the clinic hides that price */
@@ -603,7 +615,7 @@ export function BookingFlow(props: BookingFlowProps) {
             appt={{
               ref: confirmedRef,
               dateISO: date,
-              time,
+              time: timeRange(time, durationMin),
               treatment,
               dentist: dentist ?? null,
               status: "confirmed",
@@ -783,12 +795,20 @@ export function BookingFlow(props: BookingFlowProps) {
                 capable={capable}
                 load={load}
                 chairs={chairs}
+                durationMin={durationMin}
               />
               <p className="hint">{t.booking.closedDay}</p>
 
               {date ? (
                 <>
                   <Eyebrow>{t.booking.pickTime}</Eyebrow>
+                  {slotsNeeded(durationMin) > 1 ? (
+                    <p className="hint">
+                      {lang === "th"
+                        ? `บริการนี้ใช้เวลา ${durationTh(durationMin)} — เวลาที่แสดงคือเวลาเริ่ม`
+                        : `This takes ${durationMin} minutes — the times shown are start times`}
+                    </p>
+                  ) : null}
                   <div className="slotWrap">
                     {daySlots.morning.length > 0 ? (
                       <SlotBank label={t.booking.morning} times={daySlots.morning} time={time} onPick={pickTime} />
@@ -811,7 +831,7 @@ export function BookingFlow(props: BookingFlowProps) {
                   <span className="sbK">{t.common.selected}</span>
                   <span className="sbV">
                     {date ? fmtRelative(t, today, date) : t.booking.pickDate}
-                    {time ? ` · ${time}` : ""}
+                    {time ? ` · ${timeRange(time, durationMin)}` : ""}
                   </span>
                 </div>
                 {resched ? (
@@ -875,7 +895,7 @@ export function BookingFlow(props: BookingFlowProps) {
                   <span className="sbK">{t.common.selected}</span>
                   <span className="sbV">
                     {date ? fmtRelative(t, today, date) : t.booking.pickDate}
-                    {time ? ` · ${time}` : ""}
+                    {time ? ` · ${timeRange(time, durationMin)}` : ""}
                   </span>
                 </div>
                 <button type="button" className="ghostBtn" onClick={() => setStep(3)}>

@@ -39,6 +39,7 @@ import {
 import type { WaitlistDTO } from "@/server/queries";
 import { thaiDate, todayISO } from "@/lib/dates";
 import { isAgeGroup, type AgeGroup } from "@/lib/ageGroup";
+import { timeRange } from "@/lib/slots";
 import type { Perm } from "@/lib/roles";
 import type { VisitRecordInput } from "@/lib/staffTypes";
 
@@ -169,6 +170,8 @@ async function slotVerdict(
   dentistId: number | null,
   /** who it's for — only dentists who see that group count */
   group: AgeGroup | null = null,
+  /** a booking being moved — its own slots don't count against it */
+  excludeId?: number,
 ): Promise<"ok" | "invalid" | "slot_taken"> {
   const { todayISO, nowMinutes, minutesOf } = await import("@/lib/dates");
   const today = todayISO();
@@ -178,37 +181,43 @@ async function slotVerdict(
   // the same lead the calendar enforces
   if (date === today && minutesOf(time) < nowMinutes() + 60) return "invalid";
 
-  const { getChairs, liveAtSlot, activeHoldsAtSlot, slotsForDate, capableDentistIds } =
+  const { getChairs, liveAtSlot, activeHoldsAtSlot, slotsForDate, capableDentistIds, treatmentDuration } =
     await import("@/server/queries");
+  const { coveredTimes } = await import("@/lib/slots");
+  // a longer treatment (e.g. whitening, 1 hour) needs every half-hour it runs into
+  const need = coveredTimes(time, await treatmentDuration(treatmentKey));
 
-  // "any dentist": the booking joins the pool (dentist_id NULL) while the
-  // slot holds fewer live rows — bookings + active holds — than there are
-  // chairs. Pooling into a slot no capable dentist covers would wait forever.
+  // "any dentist": the booking joins the pool (dentist_id NULL) while every
+  // slot it covers holds fewer live rows — bookings + active holds — than
+  // there are chairs, and one capable dentist is on shift for all of it.
   if (dentistId === null) {
-    const [chairs, live, holds, rows, capable] = await Promise.all([
+    const [chairs, rows, capable] = await Promise.all([
       getChairs(),
-      liveAtSlot(date, time),
-      activeHoldsAtSlot(date, time),
-      slotsForDate(date),
+      slotsForDate(date, excludeId),
       capableDentistIds(treatmentKey, group),
     ]);
-    if (live.length + holds >= chairs) return "slot_taken";
-    const capableSet = new Set(capable);
-    const covered = rows.some((r) => r.time === time && capableSet.has(r.dentistId));
+    for (const t of need) {
+      const [live, holds] = await Promise.all([liveAtSlot(date, t, excludeId), activeHoldsAtSlot(date, t)]);
+      if (live.length + holds >= chairs) return "slot_taken";
+    }
+    const onShift = new Set(rows.map((r) => `${r.dentistId}:${r.time}`));
+    const covered = capable.some((id) => need.every((t) => onShift.has(`${id}:${t}`)));
     if (!covered) return "slot_taken";
     return "ok";
   }
 
-  // a named dentist must take this treatment AND be on shift at that slot —
-  // slotsForDate rows only exist inside enabled shifts on open days, and an
-  // active hold marks the slot taken exactly like a booking
+  // a named dentist must take this treatment AND be on shift and free for
+  // every slot it covers — slotsForDate rows only exist inside enabled shifts
+  // on open days, and an active hold marks its slots taken like a booking
   const [capable, rows] = await Promise.all([
     capableDentistIds(treatmentKey, group),
-    slotsForDate(date),
+    slotsForDate(date, excludeId),
   ]);
   if (!capable.includes(dentistId)) return "invalid";
-  const slot = rows.find((r) => r.dentistId === dentistId && r.time === time);
-  if (!slot || slot.taken) return "slot_taken";
+  for (const t of need) {
+    const slot = rows.find((r) => r.dentistId === dentistId && r.time === t);
+    if (!slot || slot.taken) return "slot_taken";
+  }
   return "ok";
 }
 
@@ -236,11 +245,13 @@ export async function holdSlot(input: {
     return { ok: false };
   }
   const { createHold } = await import("@/server/queries");
+  const { treatmentDuration } = await import("@/server/queries");
   const hold = await createHold({
     date: input.date,
     time: input.time,
     treatmentKey: input.treatmentKey,
     dentistId: input.dentistId,
+    durationMin: await treatmentDuration(input.treatmentKey),
   });
   if (!hold) return { ok: false }; // an active hold landed mid-flight
   return { ok: true, token: hold.token, expiresAt: hold.expiresAt.toISOString() };
@@ -342,7 +353,7 @@ export async function bookAppointment(input: {
     const { pushLineText } = await import("@/server/line");
     await pushLineText(
       identity.userId,
-      `จองคิวสำเร็จ ✓\nนัดของ ${name}\n${thaiDate(input.date)} เวลา ${input.time} น.\nรหัสจอง: ${created.ref}\nขอบคุณที่ใช้บริการ DentaKids ค่ะ`,
+      `จองคิวสำเร็จ ✓\nนัดของ ${name}\n${thaiDate(input.date)} เวลา ${timeRange(input.time, created.durationMin)} น.\nรหัสจอง: ${created.ref}\nขอบคุณที่ใช้บริการ DentaKids ค่ะ`,
     );
   }
 
@@ -366,7 +377,7 @@ export async function assignPoolDentist(
   if (!target || target.status === "cancelled" || target.dentistId !== null) {
     return { ok: false, error: "invalid" };
   }
-  const free = await freeCapableAtSlot(target.date, target.time, target.treatmentKey, target.ageGroup);
+  const free = await freeCapableAtSlot(target.date, target.time, target.treatmentKey, target.ageGroup, target.durationMin, target.id);
   if (!free.some((f) => f.id === dentistId)) return { ok: false, error: "taken" };
   await updateAppointment(id, { dentistId });
   const { settlePool } = await import("@/server/queries");
@@ -411,6 +422,7 @@ export async function myBookingsByLine(lineIdToken: string) {
     status: a.status,
     childName: a.childName,
     ageGroup: a.ageGroup,
+    durationMin: a.durationMin,
   }));
 }
 
@@ -491,7 +503,7 @@ export async function rescheduleBooking(input: {
     await releaseHold(input.holdToken);
   }
 
-  const verdict = await slotVerdict(input.date, input.time, target.treatmentKey, target.dentistId, target.ageGroup);
+  const verdict = await slotVerdict(input.date, input.time, target.treatmentKey, target.dentistId, target.ageGroup, target.id);
   if (verdict !== "ok") return { ok: false, error: verdict };
 
   try {
@@ -526,7 +538,7 @@ export async function rescheduleBooking(input: {
     if (to) {
       await pushLineText(
         to,
-        `เลื่อนนัดสำเร็จ ✓\nรหัสจอง: ${target.ref}\nนัดใหม่ ${thaiDate(input.date)} เวลา ${input.time} น.\nขอบคุณที่ใช้บริการ DentaKids ค่ะ`,
+        `เลื่อนนัดสำเร็จ ✓\nรหัสจอง: ${target.ref}\nนัดใหม่ ${thaiDate(input.date)} เวลา ${timeRange(input.time, target.durationMin)} น.\nขอบคุณที่ใช้บริการ DentaKids ค่ะ`,
       );
     }
   }
@@ -585,6 +597,19 @@ export async function staffUpdateAppointment(id: number, patch: AppointmentUpdat
   const before = touchesSlot
     ? (await listAppointmentsBetween("1970-01-01", "9999-12-31")).find((a) => a.id === id)
     : undefined;
+  // a move must not land on (or run into) another of that dentist's bookings —
+  // a one-hour booking needs both half-hours free
+  if (before && (patch.date !== undefined || patch.time !== undefined || patch.dentistId !== undefined)) {
+    const dentistId = patch.dentistId !== undefined ? patch.dentistId : before.dentistId;
+    const { overlapsDentist } = await import("@/server/queries");
+    if (
+      dentistId !== null &&
+      (patch.status ?? before.status) !== "cancelled" &&
+      (await overlapsDentist(dentistId, patch.date ?? before.date, patch.time ?? before.time, before.durationMin, id))
+    ) {
+      throw new Error("slot_taken");
+    }
+  }
   await updateAppointment(id, patch);
   // cancelling, moving or (un)assigning can home a pooled booking waiting
   // at the affected slot — run the pressure valve on both ends of a move
@@ -1279,6 +1304,7 @@ export async function staffCreateTreatment(input: {
   tint?: string;
   groupKey?: string;
   price: number | null;
+  durationMin?: number;
 }): Promise<{ ok: boolean; key?: string }> {
   await guard();
   const { isIconKey } = await import("@/data/icons");
@@ -1308,6 +1334,7 @@ export async function staffUpdateTreatment(
     groupKey?: string | null;
     price?: number | null;
     showPrice?: boolean;
+    durationMin?: number;
     isActive?: boolean;
   },
 ) {

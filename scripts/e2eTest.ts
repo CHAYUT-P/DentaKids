@@ -118,6 +118,46 @@ async function main() {
     await actions.staffUpdateDentist("naree", { treats: before.treats, treatAges: before.treatAges }); // restore
   }
 
+  console.log("\n— 4c. One-hour treatments hold two half-hours —");
+  {
+    const before = (await queries.listTreatmentCatalog()).find((t) => t.key === "whitening")!;
+    await actions.staffUpdateTreatment("whitening", { durationMin: 60 });
+    ok("whitening now takes 1 hour", (await queries.treatmentDuration("whitening")) === 60);
+    // a dentist who does whitening, on a day they work with 09:30–11:00 free
+    const doc = (await queries.listDentists()).find((d) => d.isActive && d.treats.includes("whitening"))!;
+    let d3 = addDays(today, 9);
+    const freeRun = async (iso: string) => {
+      const rows = (await queries.slotsForDate(iso)).filter((r) => r.dentistId === doc.id);
+      const free = (t: string) => rows.some((r) => r.time === t && !r.taken);
+      return ["09:30", "10:00", "10:30", "11:00"].every(free);
+    };
+    while (!(await freeRun(d3))) d3 = addDays(d3, 1);
+    const long = await actions.bookAppointment({
+      date: d3, time: "10:00", treatmentKey: "whitening", dentistId: doc.id,
+      childName: "ฟอกสีทดสอบ", phone: "0922222222", ageGroup: "adult", lineIdToken: FAMILY,
+    });
+    ok("1-hour booking at 10:00 accepted", long.ok, JSON.stringify(long));
+    const grid = (await queries.slotsForDate(d3)).filter((r) => r.dentistId === doc.id);
+    ok("10:00 and 10:30 both taken", ["10:00", "10:30"].every((t) => grid.find((r) => r.time === t)?.taken));
+    ok("11:00 still free", grid.find((r) => r.time === "11:00")?.taken === false);
+    const at1030 = await actions.bookAppointment({
+      date: d3, time: "10:30", treatmentKey: "checkup", dentistId: doc.id,
+      childName: "ชนครึ่งหลัง", phone: "0933333333", lineIdToken: FAMILY,
+    });
+    ok("10:30 refused (inside the 1-hour booking)", !at1030.ok);
+    const at0930 = await actions.bookAppointment({
+      date: d3, time: "09:30", treatmentKey: "whitening", dentistId: doc.id,
+      childName: "ชนครึ่งแรก", phone: "0944444444", ageGroup: "adult", lineIdToken: FAMILY,
+    });
+    ok("1-hour at 09:30 refused (runs into 10:00)", !at0930.ok);
+    const row = (await queries.listAppointmentsBetween(d3, d3)).find((a) => a.ref === long.ref);
+    ok("booking stored as 60 minutes", row?.durationMin === 60);
+    if (long.ok) await actions.cancelBooking(long.ref!, FAMILY);
+    const freed = (await queries.slotsForDate(d3)).filter((r) => r.dentistId === doc.id);
+    ok("cancelling frees both half-hours", ["10:00", "10:30"].every((t) => freed.find((r) => r.time === t)?.taken === false));
+    await actions.staffUpdateTreatment("whitening", { durationMin: before.durationMin }); // restore
+  }
+
   console.log("\n— 5. Online booking is name + phone only —");
   ok("booking keeps the name given", onStaff?.childName === "น้องเทสเตอร์");
   ok("no guardian/child record created from the patient site", onStaff?.guardianId === null && onStaff?.childId === null);

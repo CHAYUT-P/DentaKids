@@ -310,8 +310,8 @@ export function StaffProvider({
         ref: "…",
         createdAt: data.date,
       };
-      void mutate("บันทึกนัดหมาย", () =>
-        staffCreateAppointment({
+      void mutate("บันทึกนัดหมาย (เวลานี้อาจชนกับนัดอื่น)", async () => {
+        const ref = await staffCreateAppointment({
           date: data.date,
           time: data.time,
           treatmentKey: data.treatmentKey,
@@ -322,8 +322,10 @@ export function StaffProvider({
           source: data.source,
           note: data.notes,
           price: data.price ?? null,
-        }),
-      );
+        });
+        // null = the slot (or part of a longer treatment's time) was taken
+        if (!ref) throw new Error("slot_taken");
+      });
       return optimistic;
     },
     [mutate, slugToId],
@@ -651,6 +653,7 @@ export function StaffProvider({
                 ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
                 ...(patch.price !== undefined ? { price: patch.price } : {}),
                 ...(patch.showPrice !== undefined ? { showPrice: patch.showPrice } : {}),
+                ...(patch.durationMin !== undefined ? { durationMin: patch.durationMin } : {}),
               }
             : t,
         ),

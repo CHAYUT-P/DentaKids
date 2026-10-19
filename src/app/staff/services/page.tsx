@@ -6,6 +6,7 @@ import { iconGroups } from "@/data/icons";
 import { useT } from "@/i18n/lang";
 import type { TreatmentInfo } from "@/lib/treatments";
 import { ServiceIcon } from "@/components/shared/serviceIcons";
+import { durationTh } from "@/lib/slots";
 import { TreatmentModal } from "@/components/staff/settings/TreatmentModal";
 import { IconCheck, IconEdit, IconPlus, IconSearch } from "@/components/staff/shell/staffIcons";
 
@@ -137,6 +138,7 @@ export default function StaffServicesPage() {
                     <span className="svc-th">
                       {t.name.th}
                       {t.custom ? <span className="svc-badge">เพิ่มเอง</span> : null}
+                      {t.durationMin > 30 ? <span className="svc-badge long">{durationTh(t.durationMin)}</span> : null}
                     </span>
                     <span className="svc-en">{t.name.en}</span>
                   </span>

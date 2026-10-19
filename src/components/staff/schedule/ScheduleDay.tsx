@@ -5,6 +5,7 @@ import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
 import { addDays, weekday, daysFrom, fmtLong, thaiDate } from "@/lib/dates";
 import { canTreat } from "@/lib/convert";
+import { coveredTimes, endTime, slotsNeeded, timeRange } from "@/lib/slots";
 import { useT } from "@/i18n/lang";
 import { BookingModal } from "@/components/staff/schedule/BookingModal";
 import { AppointmentDetailModal } from "@/components/staff/schedule/AppointmentDetailModal";
@@ -128,6 +129,28 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
     return dayAppts.find((a) => a.dentistSlug === dentistSlug && a.time === time);
   };
 
+  /** a longer booking that started earlier and still runs at this time */
+  const getCoverAppt = (dentistSlug: string, time: string) =>
+    dayAppts.find(
+      (a) =>
+        a.dentistSlug === dentistSlug &&
+        a.status !== "cancelled" &&
+        a.time !== time &&
+        coveredTimes(a.time, a.durationMin).includes(time),
+    );
+
+  /** the second half-hour of a 1-hour booking: held, not bookable */
+  const renderCover = (appt: StaffAppointment) => (
+    <button
+      type="button"
+      className={`appt-cover ${appt.status}`}
+      onClick={() => setSelectedAppt(appt)}
+      title={`${appt.childName} · ${timeRange(appt.time, appt.durationMin)} น.`}
+    >
+      ↳ {appt.childName} · ต่อถึง {endTime(appt.time, appt.durationMin)}
+    </button>
+  );
+
   const dayOffset = daysFrom(today, selectedDate);
   const dateLong = fmtLong(dict, selectedDate, "th");
   const dateHint =
@@ -151,6 +174,9 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
       <div className="appt-chip-body">
         <span className="appt-treatment-name">
           {tr.name(appt.treatmentKey)}
+          {slotsNeeded(appt.durationMin) > 1 ? (
+            <span className="appt-long">{timeRange(appt.time, appt.durationMin)}</span>
+          ) : null}
           <AgeTag group={appt.ageGroup} />
         </span>
         {appt.lineName ? (
@@ -221,13 +247,22 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
       return;
     }
 
-    // any live booking holds the slot — checked in or in the chair too
-    const existing = dayAppts.find(
-      (a) => a.id !== apptId && a.dentistSlug === targetDentistSlug && a.time === targetTime && a.status !== "cancelled"
+    // any live booking holds its slots — checked in or in the chair too —
+    // and a 1-hour booking needs both half-hours it would cover
+    const need = new Set(coveredTimes(targetTime, targetAppt.durationMin));
+    const existing = appointments.find(
+      (a) =>
+        a.id !== apptId &&
+        a.date === targetDate &&
+        a.dentistSlug === targetDentistSlug &&
+        a.status !== "cancelled" &&
+        coveredTimes(a.time, a.durationMin).some((t) => need.has(t)),
     );
 
     if (existing) {
-      showToast(`เวลานี้มีนัดหมายของ ${existing.childName} อยู่แล้ว`);
+      showToast(
+        `ช่วง ${timeRange(targetTime, targetAppt.durationMin)} น. ชนกับนัดของ ${existing.childName} (${timeRange(existing.time, existing.durationMin)})`,
+      );
       return;
     }
 
@@ -422,7 +457,10 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                         className={`matrix-cell off-duty ${onLeave(d.slug, selectedDate) ? "on-leave" : ""}`}
                         title={onLeave(d.slug, selectedDate) ? "แพทย์ลาวันนี้" : "แพทย์ไม่อยู่ในเวรตรวจวันนี้"}
                       >
-                        {appt ? renderChip(appt) : null}
+                        {appt ? renderChip(appt) : (() => {
+                          const cover = getCoverAppt(d.slug, time);
+                          return cover ? renderCover(cover) : null;
+                        })()}
                       </div>
                     );
                   }
@@ -437,6 +475,8 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                     >
                       {appt ? (
                         renderChip(appt)
+                      ) : getCoverAppt(d.slug, time) ? (
+                        renderCover(getCoverAppt(d.slug, time)!)
                       ) : (
                         <button
                           type="button"

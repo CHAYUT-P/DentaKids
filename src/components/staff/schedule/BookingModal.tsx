@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
+import { coveredTimes, durationTh, slotsNeeded, timeRange } from "@/lib/slots";
 import { useStaff, type BookingSource } from "@/lib/staffStore";
 import type { IconKey } from "@/data/icons";
 import { IconX, IconPlus, IconPhone, IconWalkIn, IconSmartphone } from "@/components/staff/shell/staffIcons";
@@ -32,7 +33,7 @@ export function BookingModal({
   onClose,
   onCreated,
 }: BookingModalProps) {
-  const { today, dentists, createAppointment } = useStaff();
+  const { today, dentists, appointments, createAppointment } = useStaff();
   const tr = useTreatments();
 
   const [date, setDate] = useState(initialDate || today);
@@ -47,6 +48,17 @@ export function BookingModal({
 
   const activeDentists = dentists.filter((d) => d.isActive);
 
+  /** a 1-hour treatment holds two half-hours — does either already belong to someone? */
+  const durationMin = tr.get(treatmentKey).durationMin;
+  const need = new Set(coveredTimes(time, durationMin));
+  const clash = appointments.find(
+    (a) =>
+      a.date === date &&
+      a.dentistSlug === dentistSlug &&
+      a.status !== "cancelled" &&
+      coveredTimes(a.time, a.durationMin).some((t) => need.has(t)),
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!childName.trim()) {
@@ -57,6 +69,7 @@ export function BookingModal({
       alert("กรุณากรอกเบอร์โทร");
       return;
     }
+    if (clash) return;
 
     createAppointment({
       date,
@@ -239,10 +252,17 @@ export function BookingModal({
           </div>
 
           <div className="modal-footer">
+            {clash ? (
+              <span className="booking-clash">
+                ช่วง {timeRange(time, durationMin)} ชนกับนัดของ {clash.childName} ({timeRange(clash.time, clash.durationMin)})
+              </span>
+            ) : slotsNeeded(durationMin) > 1 ? (
+              <span className="booking-long">บริการนี้ใช้เวลา {durationTh(durationMin)} · {timeRange(time, durationMin)}</span>
+            ) : null}
             <button type="button" className="btn-secondary-staff" onClick={onClose}>
               ยกเลิก
             </button>
-            <button type="submit" className="btn-primary-staff">
+            <button type="submit" className="btn-primary-staff" disabled={!!clash}>
               <IconPlus size={15} />
               <span>บันทึกการจอง</span>
             </button>

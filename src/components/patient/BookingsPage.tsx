@@ -7,6 +7,7 @@ import type { TreatmentKey } from "@/lib/treatments";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useLang } from "@/i18n/lang";
 import { fmtShort } from "@/lib/dates";
+import { timeRange } from "@/lib/slots";
 import { useLine } from "@/lib/useLine";
 import { cancelBooking, myBookingsByLine } from "@/server/actions";
 import { RESCHEDULE_KEY, type RescheduleHandoff } from "@/components/patient/BookingFlow";
@@ -43,7 +44,7 @@ function PastRow({ a, names }: { a: Row; names: Names }) {
       <span className="hText">
         <span className="hn">{tr.name(a.treatmentKey as TreatmentKey, lang)}</span>
         <span className="hm">
-          {fmtShort(t, a.date)} · {a.time} · {dentist || t.booking.anyone}
+          {fmtShort(t, a.date)} · {timeRange(a.time, a.durationMin)} · {dentist || t.booking.anyone}
         </span>
       </span>
       <span className="hSide">
@@ -176,7 +177,7 @@ export function BookingsPage({
               appt={{
                 ref: a.ref,
                 dateISO: a.date,
-                time: a.time,
+                time: timeRange(a.time, a.durationMin),
                 treatment: a.treatmentKey as TreatmentKey,
                 dentist: a.dentistSlug,
                 status: "confirmed",

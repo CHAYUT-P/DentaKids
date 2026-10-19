@@ -12,6 +12,7 @@ import type { IconKey } from "@/data/icons";
 import { isIconKey } from "@/data/icons";
 import { addDays, minutesOf, todayISO, weekday, weekdayIndex } from "@/lib/dates";
 import { agesAllow, isAgeGroup, isTreatAges, type AgeGroup, type TreatAges } from "@/lib/ageGroup";
+import { coveredTimes, SLOT_MIN } from "@/lib/slots";
 import { newTreatmentKey, toTreatmentInfo, type TreatmentInfo, type TreatmentKey } from "@/lib/treatments";
 import type { PatientChildInput, PatientUpsertInput, VisitItem } from "@/lib/staffTypes";
 /**
@@ -304,6 +305,8 @@ export interface TreatmentInput {
   tint?: string;
   groupKey?: string;
   price: number | null;
+  /** minutes; a longer treatment holds every half-hour slot it runs into */
+  durationMin?: number;
 }
 
 /** a treatment the clinic adds: its own key, typed names, a library icon */
@@ -320,6 +323,7 @@ export async function createTreatment(input: TreatmentInput): Promise<string> {
     tint: input.tint ?? null,
     groupKey: input.groupKey ?? null,
     price: input.price,
+    durationMin: validDuration(input.durationMin) ?? 30,
     isActive: true,
     sort: Number(max) + 1,
   });
@@ -334,7 +338,13 @@ export interface TreatmentPatch {
   groupKey?: string | null;
   price?: number | null;
   showPrice?: boolean;
+  durationMin?: number;
   isActive?: boolean;
+}
+
+/** a treatment length staff may set: whole half-hours, 30 minutes to 4 hours */
+function validDuration(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isInteger(v) && v >= 30 && v <= 240 && v % 30 === 0 ? v : undefined;
 }
 
 /** edit any treatment — built-in ones too (a typed name overrides the default) */
@@ -347,6 +357,7 @@ export async function updateTreatment(key: string, patch: TreatmentPatch): Promi
   if (patch.groupKey !== undefined) set.groupKey = patch.groupKey;
   if (patch.price !== undefined) set.price = patch.price;
   if (patch.showPrice !== undefined) set.showPrice = patch.showPrice;
+  if (validDuration(patch.durationMin) !== undefined) set.durationMin = patch.durationMin;
   if (patch.isActive !== undefined) set.isActive = patch.isActive;
   await db.update(treatment).set(set).where(eq(treatment.key, key));
 }
@@ -485,7 +496,17 @@ export interface SlotRow {
   taken: boolean;
 }
 
-export async function slotsForDate(date: string): Promise<SlotRow[]> {
+/** how long a treatment takes (minutes) — longer ones hold more than one slot */
+export async function treatmentDuration(key: string): Promise<number> {
+  const [row] = await db.select({ d: treatment.durationMin }).from(treatment).where(eq(treatment.key, key));
+  return row?.d ?? SLOT_MIN;
+}
+
+/**
+ * `excludeId` leaves one booking out — moving a booking must not be blocked
+ * by the slots it is about to give up.
+ */
+export async function slotsForDate(date: string, excludeId?: number): Promise<SlotRow[]> {
   const weekdayKey = weekday(date);
   const weekdayNum = weekdayIndex(date);
 
@@ -525,19 +546,25 @@ export async function slotsForDate(date: string): Promise<SlotRow[]> {
     .where(and(eq(dentistShift.enabled, true), inArray(dentistShift.dentistId, activeIds)));
 
   const booked = await db
-    .select({ dentistId: appointment.dentistId, time: appointment.time })
+    .select({ id: appointment.id, dentistId: appointment.dentistId, time: appointment.time, durationMin: appointment.durationMin })
     .from(appointment)
     .where(and(eq(appointment.date, date), ne(appointment.status, "cancelled")));
 
-  const takenSet = new Set(booked.map((b) => `${b.dentistId}:${b.time}`));
+  // a booking takes every half-hour it runs into, not just its start
+  const takenSet = new Set<string>();
+  for (const b of booked) {
+    if (b.id === excludeId) continue;
+    for (const t of coveredTimes(b.time, b.durationMin)) takenSet.add(`${b.dentistId}:${t}`);
+  }
 
-  // an active slot hold blocks that named dentist's slot exactly like a booking
+  // an active slot hold blocks that named dentist's slots exactly like a booking
   const held = await db
-    .select({ dentistId: slotHold.dentistId, time: slotHold.time })
+    .select({ dentistId: slotHold.dentistId, time: slotHold.time, durationMin: slotHold.durationMin })
     .from(slotHold)
     .where(and(eq(slotHold.date, date), gt(slotHold.expiresAt, new Date())));
   for (const h of held) {
-    if (h.dentistId !== null) takenSet.add(`${h.dentistId}:${h.time}`);
+    if (h.dentistId === null) continue;
+    for (const t of coveredTimes(h.time, h.durationMin)) takenSet.add(`${h.dentistId}:${t}`);
   }
 
   const out: SlotRow[] = [];
@@ -623,6 +650,9 @@ export async function capableDentistIds(treatmentKey: TreatmentKey, group?: AgeG
 
 export interface SlotLiveRow {
   id: number;
+  /** the booking's start — a long booking also covers the slots after it */
+  time: string;
+  durationMin: number;
   treatmentKey: TreatmentKey;
   ageGroup: AgeGroup | null;
   dentistId: number | null;
@@ -648,35 +678,40 @@ export async function slotLoadForDates(dates: string[]): Promise<Record<string, 
     .select({
       date: appointment.date,
       time: appointment.time,
+      durationMin: appointment.durationMin,
       dentistId: appointment.dentistId,
     })
     .from(appointment)
     .where(and(inArray(appointment.date, dates), ne(appointment.status, "cancelled")));
-  for (const r of rows) {
-    const day = (out[r.date] ??= {});
-    const cell = (day[r.time] ??= { live: 0, pool: 0 });
-    cell.live += 1;
-    if (r.dentistId === null) cell.pool += 1;
-  }
 
   // active holds occupy chairs too, so a held time can't look free on the calendar
   const holds = await db
-    .select({ date: slotHold.date, time: slotHold.time, dentistId: slotHold.dentistId })
+    .select({ date: slotHold.date, time: slotHold.time, durationMin: slotHold.durationMin, dentistId: slotHold.dentistId })
     .from(slotHold)
     .where(and(inArray(slotHold.date, dates), gt(slotHold.expiresAt, new Date())));
-  for (const r of holds) {
+
+  // a long booking sits in a chair for every half-hour it runs
+  for (const r of [...rows, ...holds]) {
     const day = (out[r.date] ??= {});
-    const cell = (day[r.time] ??= { live: 0, pool: 0 });
-    cell.live += 1;
-    if (r.dentistId === null) cell.pool += 1;
+    for (const t of coveredTimes(r.time, r.durationMin)) {
+      const cell = (day[t] ??= { live: 0, pool: 0 });
+      cell.live += 1;
+      if (r.dentistId === null) cell.pool += 1;
+    }
   }
   return out;
 }
 
-/** every live (non-cancelled) booking holding one wall-clock slot, oldest first */
-export async function liveAtSlot(date: string, time: string): Promise<SlotLiveRow[]> {  const rows = await db
+/**
+ * every live (non-cancelled) booking holding one wall-clock slot, oldest
+ * first — including a longer booking that started earlier and runs into it
+ */
+export async function liveAtSlot(date: string, time: string, excludeId?: number): Promise<SlotLiveRow[]> {
+  const rows = await db
     .select({
       id: appointment.id,
+      time: appointment.time,
+      durationMin: appointment.durationMin,
       treatmentKey: appointment.treatmentKey,
       ageGroup: appointment.ageGroup,
       dentistId: appointment.dentistId,
@@ -686,18 +721,42 @@ export async function liveAtSlot(date: string, time: string): Promise<SlotLiveRo
     .where(
       and(
         eq(appointment.date, date),
-        eq(appointment.time, time),
         ne(appointment.status, "cancelled"),
       ),
     )
     .orderBy(asc(appointment.createdAt), asc(appointment.id));
-  return rows.map((r) => ({
-    id: r.id,
-    treatmentKey: isIconKey(r.treatmentKey) ? r.treatmentKey : "checkup",
-    ageGroup: isAgeGroup(r.ageGroup) ? r.ageGroup : null,
-    dentistId: r.dentistId,
-    createdAt: r.createdAt,
-  }));
+  return rows
+    .filter((r) => r.id !== excludeId && coveredTimes(r.time, r.durationMin).includes(time))
+    .map((r) => ({
+      id: r.id,
+      time: r.time,
+      durationMin: r.durationMin,
+      treatmentKey: isIconKey(r.treatmentKey) ? r.treatmentKey : "checkup",
+      ageGroup: isAgeGroup(r.ageGroup) ? r.ageGroup : null,
+      dentistId: r.dentistId,
+      createdAt: r.createdAt,
+    }));
+}
+
+/**
+ * Does a booking for this dentist from `time`, `durationMin` long, run into
+ * any of their live bookings? The unique index only guards identical start
+ * times; this catches 10:00 (1 hour) against 10:30.
+ */
+export async function overlapsDentist(
+  dentistId: number,
+  date: string,
+  time: string,
+  durationMin: number,
+  excludeId?: number,
+  q: Pick<typeof db, "select"> = db,
+): Promise<boolean> {
+  const rows = await q
+    .select({ id: appointment.id, time: appointment.time, durationMin: appointment.durationMin })
+    .from(appointment)
+    .where(and(eq(appointment.dentistId, dentistId), eq(appointment.date, date), ne(appointment.status, "cancelled")));
+  const mine = new Set(coveredTimes(time, durationMin));
+  return rows.some((r) => r.id !== excludeId && coveredTimes(r.time, r.durationMin).some((t) => mine.has(t)));
 }
 
 /* ═══════════════════════════════ slot holds ══════════════════════════════ */
@@ -713,13 +772,13 @@ export async function liveAtSlot(date: string, time: string): Promise<SlotLiveRo
 /** how long a picked slot is reserved while the family finishes the form */
 export const HOLD_MINUTES = 10;
 
-/** active holds at one wall-clock slot — they occupy chairs like bookings */
+/** active holds covering one wall-clock slot — they occupy chairs like bookings */
 export async function activeHoldsAtSlot(date: string, time: string): Promise<number> {
   const rows = await db
-    .select({ id: slotHold.id })
+    .select({ time: slotHold.time, durationMin: slotHold.durationMin })
     .from(slotHold)
-    .where(and(eq(slotHold.date, date), eq(slotHold.time, time), gt(slotHold.expiresAt, new Date())));
-  return rows.length;
+    .where(and(eq(slotHold.date, date), gt(slotHold.expiresAt, new Date())));
+  return rows.filter((r) => coveredTimes(r.time, r.durationMin).includes(time)).length;
 }
 
 /**
@@ -734,6 +793,8 @@ export async function createHold(input: {
   date: string;
   time: string;
   treatmentKey: string;
+  /** how long the treatment takes — the hold covers every slot it runs into */
+  durationMin?: number;
 }): Promise<{ token: string; expiresAt: Date } | null> {
   // prune lapsed rows so the table stays small and the upsert can reuse them
   await db.delete(slotHold).where(lt(slotHold.expiresAt, new Date()));
@@ -745,6 +806,7 @@ export async function createHold(input: {
     treatmentKey: input.treatmentKey,
     date: input.date,
     time: input.time,
+    durationMin: input.durationMin ?? SLOT_MIN,
     expiresAt,
   };
   const rows =
@@ -755,7 +817,7 @@ export async function createHold(input: {
           .values({ ...base, token })
           .onConflictDoUpdate({
             target: [slotHold.dentistId, slotHold.date, slotHold.time],
-            set: { token, expiresAt, treatmentKey: input.treatmentKey, createdAt: new Date() },
+            set: { token, expiresAt, treatmentKey: input.treatmentKey, durationMin: input.durationMin ?? SLOT_MIN, createdAt: new Date() },
             // only a lapsed hold may be replaced — an active one wins
             setWhere: lt(slotHold.expiresAt, new Date()),
           })
@@ -799,17 +861,23 @@ export async function freeCapableAtSlot(
   time: string,
   treatmentKey: TreatmentKey,
   group?: AgeGroup | null,
+  /** a longer booking needs the dentist free for every slot it covers */
+  durationMin?: number,
+  excludeId?: number,
 ): Promise<{ id: number; slug: string }[]> {
   const [capable, slots] = await Promise.all([
     capableDentistIds(treatmentKey, group),
-    slotsForDate(date),
+    slotsForDate(date, excludeId),
   ]);
   if (capable.length === 0) return [];
   const capableSet = new Set(capable);
+  const need = coveredTimes(time, durationMin);
+  const freeAt = new Set(slots.filter((s) => !s.taken).map((s) => `${s.dentistId}:${s.time}`));
   const seen = new Set<number>();
   const out: { id: number; slug: string }[] = [];
   for (const s of slots) {
-    if (s.time !== time || s.taken || !capableSet.has(s.dentistId) || seen.has(s.dentistId)) continue;
+    if (s.time !== time || !capableSet.has(s.dentistId) || seen.has(s.dentistId)) continue;
+    if (!need.every((t) => freeAt.has(`${s.dentistId}:${t}`))) continue;
     seen.add(s.dentistId);
     out.push({ id: s.dentistId, slug: s.dentistSlug });
   }
@@ -832,7 +900,7 @@ export async function settlePool(date: string, time: string): Promise<string[]> 
     if (live.length < chairs) break; // room to spare — the pool waits for staff
     const oldest = live.find((r) => r.dentistId === null);
     if (!oldest) break;
-    const free = await freeCapableAtSlot(date, time, oldest.treatmentKey, oldest.ageGroup);
+    const free = await freeCapableAtSlot(date, oldest.time, oldest.treatmentKey, oldest.ageGroup, oldest.durationMin, oldest.id);
     if (free.length === 0) break;
     const target = free[0];
     const updated = await db
@@ -868,6 +936,8 @@ export interface CreateAppointmentInput {
   forSelf?: boolean;
   /** who it is for, as the family picked it (patient site) */
   ageGroup?: AgeGroup | null;
+  /** minutes; defaults to the treatment's own length */
+  durationMin?: number;
   source?: AppointmentSource;
   note?: string;
   price?: number | null;
@@ -936,36 +1006,46 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
     }
   }
 
-  const inserted = await db
-    .insert(appointment)
-    .values({
-      ref,
-      childId,
-      childName: input.childName,
-      guardianId,
-      guardianName: input.guardianName,
-      phone: digits,
-      dentistId: input.dentistId,
-      treatmentKey: input.treatmentKey,
-      date: input.date,
-      time: input.time,
-      durationMin: 30,
-      source: input.source ?? "online",
-      status: "confirmed",
-      note: input.note ?? "",
-      price: input.price ?? null,
-      forSelf: input.forSelf ?? false,
-      ageGroup: input.ageGroup ?? null,
-      lineUserId: input.lineUserId ?? null,
-      lineName: input.lineName ?? "",
-    })
-    // the arbiter matches the partial unique index (status <> 'cancelled'):
-    // a live booking keeps its slot exclusive; cancelled ones free it
-    .onConflictDoNothing({
-      target: [appointment.dentistId, appointment.date, appointment.time],
-      where: ne(appointment.status, "cancelled"),
-    })
-    .returning();
+  const durationMin = input.durationMin ?? (await treatmentDuration(input.treatmentKey));
+
+  // one booking per dentist at a time per day: the lock makes the overlap
+  // check and the insert one step, so two long bookings can't cross mid-flight
+  const inserted = await db.transaction(async (tx) => {
+    if (input.dentistId !== null) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`appt:${input.dentistId}:${input.date}`}))`);
+      if (await overlapsDentist(input.dentistId, input.date, input.time, durationMin, undefined, tx)) return [];
+    }
+    return tx
+      .insert(appointment)
+      .values({
+        ref,
+        childId,
+        childName: input.childName,
+        guardianId,
+        guardianName: input.guardianName,
+        phone: digits,
+        dentistId: input.dentistId,
+        treatmentKey: input.treatmentKey,
+        date: input.date,
+        time: input.time,
+        durationMin,
+        source: input.source ?? "online",
+        status: "confirmed",
+        note: input.note ?? "",
+        price: input.price ?? null,
+        forSelf: input.forSelf ?? false,
+        ageGroup: input.ageGroup ?? null,
+        lineUserId: input.lineUserId ?? null,
+        lineName: input.lineName ?? "",
+      })
+      // the arbiter matches the partial unique index (status <> 'cancelled'):
+      // a live booking keeps its slot exclusive; cancelled ones free it
+      .onConflictDoNothing({
+        target: [appointment.dentistId, appointment.date, appointment.time],
+        where: ne(appointment.status, "cancelled"),
+      })
+      .returning();
+  });
 
   const row = inserted[0];
   if (!row) return null; // slot taken mid-flight

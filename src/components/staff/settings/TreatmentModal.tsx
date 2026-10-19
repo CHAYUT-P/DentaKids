@@ -5,6 +5,7 @@ import { useStaff } from "@/lib/staffStore";
 import { iconGroups, iconLibrary, tints, type IconGroup, type IconKey, type Tint } from "@/data/icons";
 import { useT } from "@/i18n/lang";
 import type { TreatmentInfo } from "@/lib/treatments";
+import { DURATION_CHOICES, durationTh, endTime } from "@/lib/slots";
 import { ServiceIcon } from "@/components/shared/serviceIcons";
 import { IconCheck, IconX } from "@/components/staff/shell/staffIcons";
 
@@ -36,6 +37,8 @@ export function TreatmentModal({ treatment, onClose }: { treatment: TreatmentInf
   const [tint, setTint] = useState<Tint>(treatment?.tint ?? "rose");
   const [quoted, setQuoted] = useState(treatment ? treatment.price === null : false);
   const [price, setPrice] = useState(treatment?.price != null ? String(treatment.price) : "");
+  /** how long it takes — a 1-hour treatment holds two half-hour booking slots */
+  const [duration, setDuration] = useState<number>(treatment?.durationMin ?? 30);
   const [err, setErr] = useState<string | null>(null);
 
   const save = (e: React.FormEvent) => {
@@ -56,6 +59,7 @@ export function TreatmentModal({ treatment, onClose }: { treatment: TreatmentInf
       tint,
       groupKey: group,
       price: num,
+      durationMin: duration,
     };
     if (editing) updateTreatment(treatment.key, { ...fields, nameEn: fields.nameEn ?? null });
     else createTreatment(fields);
@@ -145,6 +149,29 @@ export function TreatmentModal({ treatment, onClose }: { treatment: TreatmentInf
                   <span>ราคาประเมินหน้างาน</span>
                 </label>
               </div>
+            </div>
+
+            <div className="form-group">
+              <span className="tm-label">ระยะเวลาต่อคิว</span>
+              <div className="tm-durations" role="radiogroup" aria-label="ระยะเวลาต่อคิว">
+                {DURATION_CHOICES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="radio"
+                    aria-checked={duration === m}
+                    className={`staff-pill-btn ${duration === m ? "active" : ""}`}
+                    onClick={() => setDuration(m)}
+                  >
+                    {durationTh(m)}
+                  </button>
+                ))}
+              </div>
+              <span className="tm-hint">
+                {duration > 30
+                  ? `หนึ่งคิวใช้เวลา ${durationTh(duration)} — เช่น จอง 10:00 จะกันเวลา 10:00–${endTime("10:00", duration)} ไม่ให้คิวอื่นจองซ้อน`
+                  : "หนึ่งคิวใช้ช่องเวลาเดียว (30 นาที)"}
+              </span>
             </div>
 
             <div className="form-group">

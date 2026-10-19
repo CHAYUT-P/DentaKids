@@ -328,7 +328,9 @@ export const slotHold = pgTable(
     dentistId: integer("dentist_id").references(() => dentist.id, { onDelete: "cascade" }),
     treatmentKey: text("treatment_key").notNull(),
     date: text("date").notNull(), // YYYY-MM-DD
-    time: text("time").notNull(), // HH:MM
+    time: text("time").notNull(), // HH:MM — the start; a longer treatment holds the slots after it too
+    /** how long the held treatment takes — a 60-minute hold covers two half-hour slots */
+    durationMin: integer("duration_min").notNull().default(30),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
