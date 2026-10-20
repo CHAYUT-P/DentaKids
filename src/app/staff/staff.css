@@ -7086,3 +7086,19 @@ label.btn-primary-staff.disabled {
 .appt-cover.cancelled { opacity: 0.5; }
 .booking-clash { margin-right: auto; font-size: 13px; color: #c92a2a; }
 .booking-long { margin-right: auto; font-size: 13px; color: var(--staff-ink-muted); }
+
+/* Every box the same size: the system draws <select> its own (smaller,
+   squarer) way and ignores the box styles — draw it like the text fields
+   instead, with our own ▾ arrow. */
+select.form-control {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 36px;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%236b6189' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
+  cursor: pointer;
+}
+select.form-control:disabled { cursor: default; opacity: 0.6; }

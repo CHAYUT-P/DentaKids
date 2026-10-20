@@ -556,7 +556,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                     {w.status === "waiting" && (
                       <select
                         className="form-control"
-                        style={{ padding: "3px 8px", fontSize: "11.5px" }}
+                        style={{ padding: "3px 28px 3px 8px", fontSize: "11.5px", minHeight: 0, backgroundPosition: "right 9px center" }}
                         value={w.dentistSlug ?? ""}
                         onChange={(e) => assignWaitingDentist(w.id, e.target.value || null)}
                       >

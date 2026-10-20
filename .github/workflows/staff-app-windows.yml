@@ -1,0 +1,77 @@
+# Builds the staff desktop app (Denta Kids Staff) for Windows and publishes the
+# installer as a GitHub Release, so a clinic PC can download and run it.
+#
+# Run it from GitHub → Actions → "Staff app (Windows)" → Run workflow, or with
+#   gh workflow run staff-app-windows.yml
+# The installer appears under Releases as "Denta Kids Staff <version>".
+#
+# No staff PIN is baked into this build: the app asks for the clinic PIN the
+# first time it opens on each PC.
+name: Staff app (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: "Which edition to build"
+        type: choice
+        options: [queue, full]
+        default: queue
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/staff-desktop/src-tauri -> target
+
+      - name: Install packages
+        run: pnpm install --frozen-lockfile
+
+      # every build gets its own version (0.1.<run>) so Windows installs it
+      # over the previous one as an update
+      - name: Set version
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            for (const f of ["apps/staff-desktop/src-tauri/tauri.conf.json", "apps/staff-desktop/src-tauri/tauri.full.conf.json"]) {
+              if (!fs.existsSync(f)) continue;
+              const c = JSON.parse(fs.readFileSync(f, "utf8"));
+              if (c.version) c.version = "0.1.${{ github.run_number }}";
+              fs.writeFileSync(f, JSON.stringify(c, null, 2));
+            }
+          '
+
+      - name: Build and publish the installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/staff-desktop
+          tauriScript: pnpm tauri
+          args: ${{ inputs.edition == 'full' && '--bundles nsis --config src-tauri/tauri.full.conf.json' || '--bundles nsis' }}
+          tagName: staff-windows-${{ inputs.edition }}-${{ github.run_number }}
+          releaseName: "Denta Kids Staff (Windows, ${{ inputs.edition }}) 0.1.${{ github.run_number }}"
+          releaseBody: |
+            Windows installer for the staff app (${{ inputs.edition }} edition).
+            Download the `.exe` below, run it, and open "Denta Kids Staff" from the Start menu.
+            Windows may warn "Windows protected your PC" because the app isn't signed — choose "More info" → "Run anyway".
+            The first time it opens, type the clinic PIN.
+          releaseDraft: false
+          prerelease: false
