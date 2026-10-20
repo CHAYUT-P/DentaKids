@@ -338,7 +338,6 @@ export function PatientForm({
                 <button
                   type="button"
                   className="btn-action-icon danger"
-                  style={{ width: "26px", height: "26px" }}
                   title="ลบเด็กคนนี้ออก"
                   onClick={() =>
                     setS((prev) => ({ ...prev, children: prev.children.filter((x) => x.key !== c.key) }))

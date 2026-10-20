@@ -94,13 +94,13 @@ export function RangeCalendar({
   return (
     <div style={{ minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-        <button type="button" className="btn-action-icon" style={{ width: "30px", height: "30px" }} onClick={() => setView((v) => addMonths(v, -1))} aria-label="เดือนก่อนหน้า">
+        <button type="button" className="btn-action-icon" onClick={() => setView((v) => addMonths(v, -1))} aria-label="เดือนก่อนหน้า">
           <IconChevronLeft size={15} />
         </button>
         <strong style={{ fontSize: "14.5px", color: "var(--staff-ink)" }}>
           {TH_MONTHS[m - 1]} {y + 543}
         </strong>
-        <button type="button" className="btn-action-icon" style={{ width: "30px", height: "30px" }} onClick={() => setView((v) => addMonths(v, 1))} aria-label="เดือนถัดไป">
+        <button type="button" className="btn-action-icon" onClick={() => setView((v) => addMonths(v, 1))} aria-label="เดือนถัดไป">
           <IconChevronRight size={15} />
         </button>
       </div>

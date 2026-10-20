@@ -4,7 +4,8 @@ import React, { useState } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
 import { useT } from "@/i18n/lang";
-import { fmtLong } from "@/lib/dates";
+import { fmtLong, thaiDate } from "@/lib/dates";
+import { timeRange } from "@/lib/slots";
 import {
   IconX,
   IconCheck,
@@ -324,7 +325,6 @@ export function AppointmentDetailModal({
           <button
             type="button"
             className="btn-action-icon"
-            style={{ width: "32px", height: "32px" }}
             onClick={onClose}
           >
             <IconX size={18} />
@@ -537,7 +537,7 @@ export function AppointmentDetailModal({
                   <span>วันและเวลานัดหมาย</span>
                 </div>
                 <strong style={{ fontSize: "15px", color: "#2b8a3e", display: "block" }}>
-                  {appointment.date} @ {appointment.time} น.
+                  {thaiDate(appointment.date)} · {timeRange(appointment.time, appointment.durationMin)} น.
                 </strong>
               </div>
 

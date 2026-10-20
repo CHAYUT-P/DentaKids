@@ -514,16 +514,15 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                 <button
                   type="button"
                   className="btn-primary-staff"
-                  style={{ padding: "4px 8px", fontSize: "11.5px" }}
                   onClick={() => setShowWaitlistModal(true)}
                 >
                   <IconPlus size={12} />
-                  <span>+ เพิ่ม</span>
+                  <span>เพิ่ม</span>
                 </button>
                 <button
                   type="button"
                   className="btn-action-icon"
-                  style={{ width: "26px", height: "26px" }}
+                  aria-label="ปิด"
                   onClick={() => setWalkinOpen(false)}
                 >
                   <IconX size={14} />
@@ -556,7 +555,6 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                     {w.status === "waiting" && (
                       <select
                         className="form-control"
-                        style={{ padding: "3px 28px 3px 8px", fontSize: "11.5px", minHeight: 0, backgroundPosition: "right 9px center" }}
                         value={w.dentistSlug ?? ""}
                         onChange={(e) => assignWaitingDentist(w.id, e.target.value || null)}
                       >
@@ -582,7 +580,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                         <button
                           type="button"
                           className="btn-primary-staff"
-                          style={{ flex: 1, padding: "4px 8px", fontSize: "11.5px", justifyContent: "center" }}
+                          style={{ flex: 1 }}
                           onClick={() => updateWaitlistStatus(w.id, "in_chair")}
                         >
                           <span>เรียกเข้าตรวจ</span>
@@ -593,7 +591,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                         <button
                           type="button"
                           className="btn-primary-staff"
-                          style={{ flex: 1, padding: "4px 8px", fontSize: "11.5px", background: "#2b8a3e", justifyContent: "center" }}
+                          style={{ flex: 1, background: "#2b8a3e" }}
                           onClick={() => updateWaitlistStatus(w.id, "done")}
                         >
                           <IconCheck size={13} />
@@ -604,7 +602,6 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                       <button
                         type="button"
                         className="btn-action-icon"
-                        style={{ width: "26px", height: "26px" }}
                         onClick={() => removeWaitlist(w.id)}
                         title="ลบออกจากคิว"
                       >

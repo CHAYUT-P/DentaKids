@@ -204,8 +204,8 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                         title={item.isOpen ? "ปิดวันนี้" : "เปิดวันนี้"}
                         onClick={() => updateDayOpen(item.day, !item.isOpen)}
                         style={{
-                          width: "38px",
-                          height: "22px",
+                          width: "48px",
+                          height: "28px",
                           borderRadius: "999px",
                           border: "none",
                           background: item.isOpen ? "var(--staff-primary)" : "#ced4da",
@@ -219,9 +219,9 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                           style={{
                             position: "absolute",
                             top: "3px",
-                            left: item.isOpen ? "20px" : "3px",
-                            width: "16px",
-                            height: "16px",
+                            left: item.isOpen ? "23px" : "3px",
+                            width: "22px",
+                            height: "22px",
                             borderRadius: "50%",
                             background: "#ffffff",
                             transition: "left 0.15s",
@@ -383,7 +383,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                           <button
                             type="button"
                             className="btn-action-icon danger"
-                            style={{ width: "28px", height: "28px", flexShrink: 0 }}
+                            style={{ flexShrink: 0 }}
                             onClick={() => handleRemoveHoliday(h.id)}
                             title="ลบวันหยุด"
                           >

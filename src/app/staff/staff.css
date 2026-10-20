@@ -7102,3 +7102,80 @@ select.form-control {
   cursor: pointer;
 }
 select.form-control:disabled { cursor: default; opacity: 0.6; }
+
+/* ==========================================================================
+   Easy to click — one comfortable size for the controls staff use all day.
+   Buttons at least 40 px tall (44 px in a window's footer), close/arrow
+   icons 40 px, tick boxes 18 px, search boxes as tall as a button.
+   ========================================================================== */
+.btn-secondary-staff,
+.btn-primary-staff {
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  border-radius: 10px;
+  justify-content: center;
+  white-space: nowrap;
+}
+.modal-footer .btn-secondary-staff,
+.modal-footer .btn-primary-staff {
+  min-height: 44px;
+  padding: 0 20px;
+  font-size: 15px;
+}
+.btn-action-icon {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
+/* real tick boxes and radio dots — not the ones drawn as switches */
+.staff-root input[type="checkbox"]:not(.svc-switch input):not(.de-status input),
+.staff-root input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--staff-primary);
+  cursor: pointer;
+}
+.staff-root label:has(> input[type="checkbox"]),
+.staff-root label:has(> input[type="radio"]) {
+  cursor: pointer;
+}
+
+.staff-search-box {
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+}
+.staff-search-box input {
+  min-height: 40px;
+}
+
+/* a pill that is also a switch (e.g. พักเที่ยง) */
+button.status-pill {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+/* the "open the patient site" link under the settings menu */
+.setup-nav-foot a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 4px;
+}
+
+/* walk-in panel: the same buttons as everywhere else */
+.walkin-drawer .btn-primary-staff,
+.walkin-drawer .btn-secondary-staff {
+  min-height: 40px;
+  font-size: 14px;
+}
+
+/* new appointment / walk-in: wide enough for a full dentist name */
+.modal-card.booking-card { max-width: 640px; }

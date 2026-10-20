@@ -40,7 +40,7 @@ export function AddWaitlistModal({ onClose }: AddWaitlistModalProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card booking-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>ลงทะเบียน Walk-in (คิวรอตรวจวันนี้)</h3>
           <button type="button" className="btn-action-icon" onClick={onClose}>
