@@ -7179,3 +7179,34 @@ button.status-pill {
 
 /* new appointment / walk-in: wide enough for a full dentist name */
 .modal-card.booking-card { max-width: 640px; }
+
+/* "didn't book through LINE — call the family": the step staff must not miss */
+.call-family {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: #fff4d6;
+  border: 2px solid #f2c97d;
+  color: #6b4a00;
+}
+.call-family .cf-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #ffffff;
+  color: #b7791f;
+}
+.call-family .cf-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.call-family strong { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.call-family .cf-phone {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #4a3300;
+  user-select: all;
+}

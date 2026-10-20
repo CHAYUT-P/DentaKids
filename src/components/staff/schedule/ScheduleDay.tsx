@@ -22,6 +22,7 @@ import {
   IconDentist,
 } from "@/components/staff/shell/staffIcons";
 import { AgeTag } from "@/components/staff/shell/AgeTag";
+import { CallFamilyNotice } from "@/components/staff/shell/CallFamilyNotice";
 
 const TIME_SLOTS = [
   "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
@@ -659,7 +660,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
                     <span>แจ้งผู้ปกครองทาง LINE ว่าเปลี่ยนเวลานัด</span>
                   </label>
                 ) : (
-                  <p className="move-note">นัดนี้ไม่ได้จองผ่าน LINE — โทรแจ้งผู้ปกครองที่ {m.appt.phone}</p>
+                  <CallFamilyNotice phone={m.appt.phone} />
                 )}
               </div>
               <div className="modal-footer">

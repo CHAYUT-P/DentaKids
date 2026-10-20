@@ -21,6 +21,7 @@ import {
 } from "@/components/staff/shell/staffIcons";
 import { PatientFileButton } from "@/components/staff/patients/PatientFileView";
 import { AgeTag } from "@/components/staff/shell/AgeTag";
+import { CallFamilyNotice } from "@/components/staff/shell/CallFamilyNotice";
 
 /** quick reasons the desk can drop into the message to the family */
 const REASONS = ["คุณหมอติดธุระ", "คุณหมอลา", "คลินิกปิดทำการ"];
@@ -52,14 +53,7 @@ function LineCompose({
   alwaysOn?: boolean;
 }) {
   if (!hasLine) {
-    return (
-      <div className="line-compose off">
-        <IconPhone size={15} />
-        <span>
-          นัดนี้ไม่ได้จองผ่าน LINE — โทรแจ้งผู้ปกครองที่ <strong>{phone}</strong>
-        </span>
-      </div>
-    );
+    return <CallFamilyNotice phone={phone} />;
   }
   return (
     <div className="line-compose">
