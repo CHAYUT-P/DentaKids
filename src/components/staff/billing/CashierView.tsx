@@ -60,6 +60,7 @@ import {
   IconSmartphone,
   IconX,
 } from "@/components/staff/shell/staffIcons";
+import { DateField } from "@/components/staff/shell/DateField";
 
 type PrintTarget = { kind: "receipt"; bill: Bill } | { kind: "close"; close: DayClose };
 
@@ -942,7 +943,7 @@ function ExpensesView({ date, onChanged }: { date: string; onChanged: () => Prom
       <section className="pf-card wide">
         <h3>บันทึกค่าใช้จ่าย</h3>
         <div className="move-form">
-          <input className="form-control" type="date" aria-label="วันที่" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+          <DateField ariaLabel="วันที่" value={f.date} onChange={(v) => setF({ ...f, date: v })} />
           <select className="form-control" aria-label="หมวด" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
             {EXPENSE_CATEGORIES.map((c) => (
               <option key={c} value={c}>

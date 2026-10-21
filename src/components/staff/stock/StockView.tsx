@@ -33,6 +33,7 @@ import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaffUser, NoAccess } from "@/lib/staffUser";
 import { EditionNotice } from "@/components/staff/shell/DeviceGate";
 import { IconAlertTriangle, IconPlus, IconSearch, IconX } from "@/components/staff/shell/staffIcons";
+import { DateField } from "@/components/staff/shell/DateField";
 
 type Tab = "items" | "moves" | "consumables" | "labs" | "suppliers";
 
@@ -337,7 +338,7 @@ function MovesTab({ items, onChanged }: { items: StockItem[]; onChanged: () => P
             <>
               <input className="form-control num" inputMode="numeric" aria-label="ต้นทุนต่อหน่วย" placeholder="ต้นทุน/หน่วย" value={f.unitCost} onChange={(e) => setF({ ...f, unitCost: e.target.value.replace(/\D/g, "") })} />
               <input className="form-control" aria-label="ล็อต" placeholder="ล็อต" value={f.lot} onChange={(e) => setF({ ...f, lot: e.target.value })} />
-              <input className="form-control" type="date" aria-label="วันหมดอายุ" value={f.expiry} onChange={(e) => setF({ ...f, expiry: e.target.value })} />
+              <DateField ariaLabel="วันหมดอายุ" placeholder="วันหมดอายุ" clearable value={f.expiry} onChange={(v) => setF({ ...f, expiry: v })} />
             </>
           ) : null}
           <input className="form-control" aria-label="หมายเหตุ" placeholder="หมายเหตุ" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
@@ -572,11 +573,11 @@ function LabsTab({ suppliers }: { suppliers: Supplier[] }) {
             </label>
             <label>
               วันที่ส่ง
-              <input className="form-control" type="date" value={edit.sentDate ?? today} onChange={(e) => setEdit({ ...edit, sentDate: e.target.value })} />
+              <DateField value={edit.sentDate ?? today} onChange={(v) => setEdit({ ...edit, sentDate: v })} />
             </label>
             <label>
               นัดรับงาน
-              <input className="form-control" type="date" value={edit.dueDate ?? ""} onChange={(e) => setEdit({ ...edit, dueDate: e.target.value || null })} />
+              <DateField clearable value={edit.dueDate ?? ""} onChange={(v) => setEdit({ ...edit, dueDate: v || null })} />
             </label>
             <label>
               ค่าแลป (บาท)

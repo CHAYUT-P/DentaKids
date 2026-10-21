@@ -61,6 +61,7 @@ import {
   IconPlus,
   IconX,
 } from "@/components/staff/shell/staffIcons";
+import { DateField } from "@/components/staff/shell/DateField";
 
 type Tab = "overview" | "chart" | "plans" | "history" | "docs" | "files";
 
@@ -857,7 +858,7 @@ function DocsTab({
         <div className="form-row-2">
           <div className="form-group">
             <label htmlFor="doc-date">วันที่</label>
-            <input id="doc-date" type="date" className="form-control" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            <DateField id="doc-date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
           </div>
           <div className="form-group">
             <label htmlFor="doc-dentist">ทันตแพทย์</label>

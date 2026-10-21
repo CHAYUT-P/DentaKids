@@ -6,6 +6,7 @@ import { coveredTimes, durationTh, slotsNeeded, timeRange } from "@/lib/slots";
 import { useStaff, type BookingSource } from "@/lib/staffStore";
 import type { IconKey } from "@/data/icons";
 import { IconX, IconPlus, IconPhone, IconWalkIn, IconSmartphone } from "@/components/staff/shell/staffIcons";
+import { DateField } from "@/components/staff/shell/DateField";
 
 interface BookingModalProps {
   initialDate?: string;
@@ -213,13 +214,7 @@ export function BookingModal({
             <div className="form-row-2">
               <div className="form-group">
                 <label>วันที่นัดหมาย</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                />
+                <DateField value={date} onChange={setDate} min={today} ariaLabel="วันที่นัดหมาย" />
               </div>
 
               <div className="form-group">

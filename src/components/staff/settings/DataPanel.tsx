@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import { staffExportBills, staffExportPatients, staffImportPatients } from "@/server/actions";
 import { FIELD_NAMES, guessColumns, parseCsv, type ImportField } from "@/lib/dataio";
 import { useStaff } from "@/lib/staffStore";
+import { DateField } from "@/components/staff/shell/DateField";
 
 /** hand a string to the browser as a file to save */
 function download(name: string, text: string) {
@@ -150,8 +151,8 @@ export function DataPanel() {
         </div>
         <div className="export-row">
           <span>บิลและการรับเงิน</span>
-          <input className="form-control" type="date" aria-label="ตั้งแต่" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <input className="form-control" type="date" aria-label="ถึง" value={to} onChange={(e) => setTo(e.target.value)} />
+          <DateField ariaLabel="ตั้งแต่" value={from} onChange={setFrom} max={to || undefined} />
+          <DateField ariaLabel="ถึง" value={to} onChange={setTo} min={from || undefined} />
           <button type="button" className="btn-secondary-staff" onClick={async () => download(`bills-${from}_${to}.csv`, await staffExportBills(from, to))}>
             ดาวน์โหลด CSV
           </button>

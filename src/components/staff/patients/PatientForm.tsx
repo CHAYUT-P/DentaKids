@@ -5,6 +5,8 @@ import type { PatientChild, PatientRecord } from "@/lib/staffStore";
 import { IconPlus, IconX } from "@/components/staff/shell/staffIcons";
 import { COVERAGE_LABEL } from "@/lib/billing";
 import { idCardReaderAvailable, readIdCard, thaiFullName } from "@/lib/idCard";
+import { DateField } from "@/components/staff/shell/DateField";
+import { todayISO } from "@/lib/dates";
 
 /**
  * The patient add/edit form (full edition) — guardian, then each child with
@@ -386,11 +388,13 @@ export function PatientForm({
               </div>
               <div className="form-group">
                 <label>วันเกิด</label>
-                <input
-                  type="date"
-                  className="form-control"
+                <DateField
+                  ariaLabel="วันเกิด"
+                  placeholder="เลือกวันเกิด"
+                  clearable
+                  max={todayISO()}
                   value={c.birthdate}
-                  onChange={(e) => setChild(c.key, { birthdate: e.target.value })}
+                  onChange={(v) => setChild(c.key, { birthdate: v })}
                 />
               </div>
             </div>

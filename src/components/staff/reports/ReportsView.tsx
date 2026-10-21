@@ -10,6 +10,7 @@ import { useStaff } from "@/lib/staffStore";
 import { useT } from "@/i18n/lang";
 import { useStaffUser, NoAccess } from "@/lib/staffUser";
 import { EditionNotice } from "@/components/staff/shell/DeviceGate";
+import { DateField } from "@/components/staff/shell/DateField";
 
 type Preset = "today" | "month" | "lastMonth" | "year" | "custom";
 
@@ -105,8 +106,8 @@ export function ReportsView() {
           </div>
           {preset === "custom" ? (
             <span className="report-range">
-              <input className="form-control" type="date" aria-label="ตั้งแต่" value={from} onChange={(e) => setRange([e.target.value, to])} />
-              <input className="form-control" type="date" aria-label="ถึง" value={to} onChange={(e) => setRange([from, e.target.value])} />
+              <DateField ariaLabel="ตั้งแต่" value={from} onChange={(v) => setRange([v, to])} max={to || undefined} />
+              <DateField ariaLabel="ถึง" value={to} onChange={(v) => setRange([from, v])} min={from || undefined} />
             </span>
           ) : null}
         </div>

@@ -22,6 +22,7 @@ import {
 import { PatientFileButton } from "@/components/staff/patients/PatientFileView";
 import { AgeTag } from "@/components/staff/shell/AgeTag";
 import { CallFamilyNotice } from "@/components/staff/shell/CallFamilyNotice";
+import { DateField } from "@/components/staff/shell/DateField";
 
 /** quick reasons the desk can drop into the message to the family */
 const REASONS = ["คุณหมอติดธุระ", "คุณหมอลา", "คลินิกปิดทำการ"];
@@ -736,12 +737,7 @@ export function AppointmentDetailModal({
               <div className="form-row-2">
                 <div className="form-group">
                   <label>วันที่ใหม่</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={newDate}
-                    onChange={(e) => setNewDate(e.target.value)}
-                  />
+                  <DateField value={newDate} onChange={setNewDate} min={today} ariaLabel="วันที่ใหม่" />
                 </div>
                 <div className="form-group">
                   <label>เวลาใหม่</label>
