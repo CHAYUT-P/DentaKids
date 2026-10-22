@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: [
       { find: "@/server/actions", replacement: path.resolve(here, "src/api.ts") },
+      { find: "@/lib/staffEventsConnect", replacement: path.resolve(here, "src/staffEventsConnect.ts") },
       { find: "@/components/staff/shell/StaffSidebar", replacement: path.resolve(here, "src/components/StaffSidebar.tsx") },
       { find: "@/app", replacement: path.resolve(mainSrc, "app") },
       { find: "@/components", replacement: path.resolve(mainSrc, "components") },

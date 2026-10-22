@@ -1,0 +1,14 @@
+Live updates benchmark → http://localhost:3002
+
+1. full staff-data download: 3218.0 KB, 79 ms (median of 5)
+2. save → other screens notified: median 18 ms, p95 25 ms (20 saves)
+   + one download to show it: ~79 ms → fresh on screen in ~98 ms
+3. idle for 150 s with the live connection open…
+   3 connections, 102 bytes in 150 s
+
+Per open staff screen, per hour, nothing changing:
+  polling every 20 s : 180 requests, 565.7 MB downloaded
+  live updates      : 72 requests, 2.4 KB downloaded
+  → 60% fewer requests, 100% less data
+Each save adds one download per screen (only when something changed).
+Update delay: polling 10 s on average (up to 20 s) → live ~98 ms

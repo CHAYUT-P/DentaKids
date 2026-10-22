@@ -1,7 +1,10 @@
 # Caddy fronts the app: HTTPS (Let's Encrypt, renewed automatically) when
 # SITE_ADDRESS is a domain pointed at this server; plain HTTP for ":80".
 {$SITE_ADDRESS} {
-	encode zstd gzip
+	# compress everything except the staff live-updates stream (SSE), which
+	# must reach the screens as each event happens, not when a buffer fills
+	@compressible not path /api/staff/events
+	encode @compressible zstd gzip
 	request_body {
 		max_size 6MB
 	}

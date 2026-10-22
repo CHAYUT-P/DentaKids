@@ -128,13 +128,22 @@ function revalidatePatientSite() {
   revalidate("/notifications");
 }
 
-function revalidateStaff() {
+function revalidateStaffPaths() {
   for (const p of STAFF_PATHS) revalidate(p);
 }
 
-function revalidateAll() {
+/** after a staff-only save: fresh staff pages and a live "something changed"
+ *  to every open staff screen (src/server/changes.ts) */
+async function revalidateStaff() {
+  revalidateStaffPaths();
+  const { notifyChange } = await import("@/server/changes");
+  await notifyChange();
+}
+
+/** after any save: fresh pages for families, and the staff screens told */
+async function revalidateAll() {
   revalidatePatientSite();
-  revalidateStaff();
+  await revalidateStaff();
 }
 
 /** a cancellation the patient made — staff hear about it immediately */
@@ -378,7 +387,7 @@ export async function bookAppointment(input: {
     );
   }
 
-  revalidateAll();
+  await revalidateAll();
   return { ok: true, ref: created.ref };
 }
 
@@ -403,7 +412,7 @@ export async function assignPoolDentist(
   await updateAppointment(id, { dentistId });
   const { settlePool } = await import("@/server/queries");
   await settlePool(target.date, target.time);
-  revalidateAll();
+  await revalidateAll();
   return { ok: true };
 }
 
@@ -490,7 +499,7 @@ export async function cancelBooking(ref: string, lineIdToken: string): Promise<{
   const { settlePool } = await import("@/server/queries");
   await settlePool(target.date, target.time);
   await dbInsertCancellationNotice(target.ref, target.childName, target.date, target.time);
-  revalidateAll();
+  await revalidateAll();
   return { ok: true };
 }
 
@@ -564,7 +573,7 @@ export async function rescheduleBooking(input: {
     }
   }
 
-  revalidateAll();
+  await revalidateAll();
   return { ok: true, ref: target.ref };
 }
 
@@ -606,7 +615,7 @@ export async function staffCreateAppointment(input: {
 }) {
   await guard();
   const created = await createAppointment({ ...input, source: input.source, idempotencyKey: validKey(input.idempotencyKey) });
-  revalidateAll();
+  await revalidateAll();
   return created?.ref ?? null;
 }
 
@@ -652,7 +661,7 @@ export async function staffUpdateAppointment(id: number, patch: AppointmentUpdat
       await db.delete(messageLog).where(and(eq(messageLog.appointmentId, id), like(messageLog.kind, "reminder_%")));
     }
   }
-  revalidateAll();
+  await revalidateAll();
 }
 
 /**
@@ -677,7 +686,7 @@ export async function staffSetQueueStatus(
     const { scheduleRecallForAppointment } = await import("@/server/clinical");
     await scheduleRecallForAppointment(id);
   }
-  revalidateAll();
+  await revalidateAll();
 }
 
 /** the booking-rules knob (chairs) the settings page owns */
@@ -685,7 +694,7 @@ export async function staffUpdateChairs(chairs: number) {
   await guard();
   const { setChairs } = await import("@/server/queries");
   await setChairs(chairs);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffDeleteAppointment(id: number) {
@@ -697,7 +706,7 @@ export async function staffDeleteAppointment(id: number) {
     const { settlePool } = await import("@/server/queries");
     await settlePool(target.date, target.time);
   }
-  revalidateAll();
+  await revalidateAll();
 }
 
 /* ═══════════════════════════ staff: dentists ════════════════════════════ */
@@ -724,7 +733,7 @@ export async function staffUpdateDentist(slug: string, patch: DentistUpdate) {
     ...(small !== undefined ? { photoSmall: small } : {}),
     ...(large !== undefined ? { photoLarge: large } : {}),
   });
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffCreateDentist(input: NewDentistInput) {
@@ -734,7 +743,7 @@ export async function staffCreateDentist(input: NewDentistInput) {
     photoSmall: photoPatch(input.photoSmall) ?? "",
     photoLarge: photoPatch(input.photoLarge) ?? "",
   });
-  revalidateAll();
+  await revalidateAll();
 }
 
 /* ═══════════════════════════ staff: patients ════════════════════════════ */
@@ -742,19 +751,19 @@ export async function staffCreateDentist(input: NewDentistInput) {
 export async function staffUpsertPatient(input: CreatePatientInput) {
   await guard();
   await upsertGuardian(input);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffUpdatePatient(id: number, patch: Partial<CreatePatientInput>) {
   await guard();
   await updatePatient(id, patch);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffAddChild(patientId: number, child: string | ChildInput) {
   await guard();
   await addChildToGuardian(patientId, child);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /* ═══════════════════════════ staff: waitlist (queue) ════════════════════ */
@@ -768,7 +777,7 @@ export async function staffAddWaitlist(input: {
 }) {
   await guard();
   await addWaitlist(input);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /* ═══════════════════ staff: visit records (room page) ═══════════════════ */
@@ -778,7 +787,7 @@ export async function staffSaveVisitRecord(input: VisitRecordInput) {
   await guard();
   const { upsertVisitRecord } = await import("@/server/queries");
   await upsertVisitRecord(input);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /**
@@ -796,19 +805,19 @@ export async function staffFinishVisit(input: VisitRecordInput) {
   } else if (input.waitlistId != null) {
     await updateWaitlistStatus(input.waitlistId, "done");
   }
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffSetWaitlistStatus(id: number, status: WaitlistDTO["status"], dentistId?: number | null) {
   await guard();
   await updateWaitlistStatus(id, status, dentistId);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffRemoveWaitlist(id: number) {
   await guard();
   await removeWaitlist(id);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /* ═══════════════════════════ staff: prices & schedule ═══════════════════ */
@@ -816,7 +825,7 @@ export async function staffRemoveWaitlist(id: number) {
 export async function staffUpdatePrice(key: IconKey, price: number | null) {
   await guard();
   await updateTreatmentPrice(key, price);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /**
@@ -856,7 +865,7 @@ export async function staffEnsurePatient(input: Parameters<Clinical["ensurePatie
   await guard("patients");
   const { ensurePatient } = await import("@/server/clinical");
   const id = await ensurePatient(input);
-  revalidateAll();
+  await revalidateAll();
   return id;
 }
 
@@ -1165,7 +1174,7 @@ export async function staffImportPatients(rows: Parameters<typeof import("@/serv
   const { importPatients } = await import("@/server/dataio");
   const r = await importPatients(rows);
   await logAction("นำเข้ารายชื่อคนไข้", `เพิ่ม ${r.created} · อัปเดต ${r.updated} · ข้าม ${r.skipped}`);
-  revalidateAll();
+  await revalidateAll();
   return r;
 }
 
@@ -1308,7 +1317,7 @@ export async function staffAddDentistLeave(dentistSlug: string, start: string, e
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return { ok: false };
   const { addDentistLeave } = await import("@/server/queries");
   const ok = await addDentistLeave(dentistSlug, start, end, note);
-  revalidateAll();
+  await revalidateAll();
   return { ok };
 }
 
@@ -1316,7 +1325,7 @@ export async function staffRemoveDentistLeave(id: number) {
   await guard();
   const { removeDentistLeave } = await import("@/server/queries");
   await removeDentistLeave(id);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /** ตั้งค่า → บริการ & ราคา: add a treatment (its own name, a reused icon) */
@@ -1334,7 +1343,7 @@ export async function staffCreateTreatment(input: {
   if (!input.nameTh?.trim() || !isIconKey(input.iconKey)) return { ok: false };
   const { createTreatment } = await import("@/server/queries");
   const key = await createTreatment(input);
-  revalidateAll();
+  await revalidateAll();
   return { ok: true, key };
 }
 
@@ -1344,7 +1353,7 @@ export async function staffSetAllShowPrice(show: boolean) {
   await guard();
   const { setAllShowPrice } = await import("@/server/queries");
   await setAllShowPrice(show === true);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffUpdateTreatment(
@@ -1366,13 +1375,13 @@ export async function staffUpdateTreatment(
   if (patch.iconKey !== undefined && !isIconKey(patch.iconKey)) return;
   const { updateTreatment } = await import("@/server/queries");
   await updateTreatment(key, patch);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffUpdateDay(day: string, patch: { isOpen?: boolean; start?: string; end?: string }) {
   await guard();
   await updateClinicDay(day, patch);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /** the /clinic page + home info card content */
@@ -1390,19 +1399,19 @@ export async function staffUpdateClinicInfo(patch: {
 }) {
   await guard();
   await updateClinicInfo(patch);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffAddHoliday(start: string, end: string, name: string) {
   await guard();
   await addHolidayRange(start, end, name);
-  revalidateAll();
+  await revalidateAll();
 }
 
 export async function staffRemoveHoliday(id: number) {
   await guard();
   await removeHoliday(id);
-  revalidateAll();
+  await revalidateAll();
 }
 
 /* ═══════════════════════════ staff: notifications ═══════════════════════ */
@@ -1410,7 +1419,7 @@ export async function staffRemoveHoliday(id: number) {
 export async function staffMarkNotificationsRead() {
   await guard();
   await markNotificationsRead();
-  revalidateStaff();
+  await revalidateStaff();
 }
 
 /** convenience read the staff console uses after mutations */
@@ -1454,6 +1463,9 @@ export async function staffBootstrap() {
   } = await import("@/server/queries");
 
   const today = (await import("@/lib/dates")).todayISO();
+  // read before the data: a change landing in between makes the screen fetch
+  // again (harmless), never miss it
+  const changeSeq = await (await import("@/server/changes")).currentChangeSeq();
 
   const lineUnread = await (await import("@/server/chat")).unreadCount().catch(() => 0);
   const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves, clinicInfo] =
@@ -1489,6 +1501,8 @@ export async function staffBootstrap() {
     settings: { chairs },
     /** the clinic's saved contact details — the settings form starts from these */
     clinicInfo,
+    /** the change number this data is current to (live updates, design/04) */
+    changeSeq,
     /** unanswered LINE messages — the full edition's แชท LINE badge */
     lineUnread,
   };

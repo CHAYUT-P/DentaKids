@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2021",
-    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2021",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -11,12 +15,29 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client"],
+    "types": [
+      "vite/client"
+    ],
     "paths": {
-      "@/server/actions": ["./src/api.ts"],
-      "@/components/staff/StaffSidebar": ["./src/components/StaffSidebar.tsx"],
-      "@/*": ["../../src/*"]
+      "@/server/actions": [
+        "./src/api.ts"
+      ],
+      "@/lib/staffEventsConnect": [
+        "./src/staffEventsConnect.ts"
+      ],
+      "@/components/staff/StaffSidebar": [
+        "./src/components/StaffSidebar.tsx"
+      ],
+      "@/*": [
+        "../../src/*"
+      ]
     }
   },
-  "include": ["src", "vite.config.ts", "../../src/app/staff", "../../src/components/staff", "../../src/lib/staffStore.tsx"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "../../src/app/staff",
+    "../../src/components/staff",
+    "../../src/lib/staffStore.tsx"
+  ]
 }

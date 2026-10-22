@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -15,6 +16,7 @@ import type { DentistLeave } from "@/lib/staffTypes";
 import { TreatmentsProvider } from "@/lib/treatmentsContext";
 import type { ClinicDaySetting } from "@/lib/clinicSettings";
 import { todayISO } from "@/lib/dates";
+import { openStaffEvents } from "@/lib/staffEvents";
 import {
   assignPoolDentist,
   staffAddChild,
@@ -202,6 +204,7 @@ function withDefaults(b: StaffBootstrap): StaffBootstrap {
     visitRecords: b.visitRecords ?? [],
     notifications: b.notifications ?? [],
     lineUnread: b.lineUnread ?? 0,
+    changeSeq: b.changeSeq ?? 0,
   };
 }
 
@@ -268,17 +271,51 @@ export function StaffProvider({
 
   /**
    * Several machines hold the console open at once (front desk + room PCs).
-   * Polling keeps them convergent — a check-in on one desk shows up on the
-   * dentist's screen within POLL_MS without anyone reloading.
+   * Live updates keep them convergent (docs/design/04-live-updates.md): the
+   * server announces a change number on every save, and this screen
+   * re-downloads only when that number is newer than its data — within a
+   * moment, instead of up to 20 s later and 180 full downloads an hour. If
+   * live updates aren't available, it falls back to polling every POLL_MS.
    */
+  const knownSeq = useRef(0);
+  useEffect(() => {
+    knownSeq.current = Math.max(knownSeq.current, state.changeSeq ?? 0);
+  }, [state.changeSeq]);
+  const syncingRef = useRef(false);
+  useEffect(() => {
+    syncingRef.current = syncing;
+  }, [syncing]);
+
   useEffect(() => {
     const POLL_MS = 20_000;
-    const t = setInterval(() => {
-      // a mutation round-trip already re-reads the world; skip the overlap
-      if (!syncing) refresh();
-    }, POLL_MS);
-    return () => clearInterval(t);
-  }, [syncing, refresh]);
+    let poll: ReturnType<typeof setInterval> | undefined;
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    // a mutation round-trip already re-reads the world; skip the overlap
+    const pull = () => {
+      if (!syncingRef.current) refresh();
+    };
+    const close = openStaffEvents({
+      onSeq: (seq) => {
+        if (poll) {
+          clearInterval(poll);
+          poll = undefined;
+        }
+        if (seq > knownSeq.current) {
+          // a burst of saves (e.g. a bill with several lines) → one refresh
+          clearTimeout(soon);
+          soon = setTimeout(pull, 150);
+        }
+      },
+      onDown: () => {
+        if (!poll) poll = setInterval(pull, POLL_MS);
+      },
+    });
+    return () => {
+      close();
+      clearInterval(poll);
+      clearTimeout(soon);
+    };
+  }, [refresh]);
 
   const setDeviceMode = useCallback((mode: DeviceMode) => {
     setDeviceModeState(mode);

@@ -135,6 +135,8 @@ export interface StaffBootstrap {
   treatments: TreatmentInfo[];
   dentistLeaves: DentistLeave[];
   lineUnread: number;
+  /** the change number this data is current to (live updates) */
+  changeSeq: number;
   settings: { chairs: number };
   clinicInfo: {
     phone: string;
@@ -643,4 +645,13 @@ export function staffMarkNotificationsRead() {
 /** the latest errors the system recorded — the สถานะระบบ card */
 export function staffSystemStatus() {
   return call<{ source: string; message: string; where: string; count: number; lastSeen: string }[]>("systemStatus");
+}
+
+/** open the live-updates stream (see src/lib/staffEvents.ts) with this app's sign-in */
+export function staffEventsFetch(signal: AbortSignal): Promise<Response> {
+  return fetch(`${API}/api/staff/events`, {
+    headers: { Authorization: `Bearer ${token}`, ...(userToken ? { "X-Staff-User": userToken } : {}) },
+    cache: "no-store",
+    signal,
+  });
 }

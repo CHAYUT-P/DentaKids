@@ -1,7 +1,7 @@
 # Denta Kids: project overview
 
 *Start here. This is what the system is, how the pieces fit, where the code
-lives, and why it's built this way. Last updated 2026-10-22.*
+lives, and why it's built this way. Last updated 2026-10-23.*
 
 ## 1. What it is
 
@@ -49,7 +49,8 @@ screens**, built separately with Vite, and talks to `/api/staff`.
 src/
   app/                    Next.js routes: patient pages, /staff (web console), /api/*
     api/staff/route.ts    the staff app's API: one POST, maps an action name → server function
-    api/queue, api/display, api/cron/reminders, api/line/webhook, api/dentist-photo
+    api/staff/events      live updates for the staff screens (Server-Sent Events)
+    api/queue, api/display, api/cron/reminders, api/line/webhook, api/dentist-photo, api/health
   components/
     patient/              patient website screens (BookingFlow.tsx is the booking flow)
     staff/                staff screens by area: shell/ schedule/ settings/ patients/ billing/ …
@@ -147,7 +148,7 @@ the `.exe` from Releases on each PC.
 | 1. No double booking / no double charge (locks + idempotency) | ✅ Done | [design/01](design/01-no-double-booking.md) |
 | 2. CI: tests and checks on every push, billing-math unit tests | ✅ Done | [design/02](design/02-ci.md) |
 | 3. Monitoring: error tracking + uptime alerts | ✅ Done | [design/03](design/03-monitoring.md). Owner setup: `ALERT_LINE_USER_ID` + UptimeRobot |
-| 4. Live updates instead of 20-second polling (each poll currently downloads all data) | ⏳ | Measure requests and bytes before/after |
+| 4. Live updates instead of 20-second polling | ✅ Done | [design/04](design/04-live-updates.md). A save shows on other screens in ~0.1 s instead of 10 s; idle traffic 566 MB/h → 2.4 KB/h per screen |
 | 5. HTTP load test (k6) against a deployed copy | ⏳ | |
 
 ## 9. Things to know before changing anything

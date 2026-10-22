@@ -26,6 +26,9 @@ async function keep(ev: LineEvent) {
   if (!userId || ev.type !== "message" || !ev.message) return;
   const { saveIncoming } = await import("@/server/chat");
   await saveIncoming(userId, ev.message.type, ev.message.text ?? "").catch(() => {});
+  // the staff screens' LINE chat badge updates live
+  const { notifyChange } = await import("@/server/changes");
+  await notifyChange();
 }
 
 function validSignature(rawBody: string, signature: string | null): boolean {
