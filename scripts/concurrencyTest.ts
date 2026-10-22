@@ -85,7 +85,7 @@ async function main() {
     const results = await timed(`${N} at once`, () =>
       Promise.all(
         Array.from({ length: N }, (_, i) =>
-          actions.bookAppointment({
+          actions.bookAppointment({ ageGroup: "kid",
             date, time: times[0], treatmentKey: "checkup", dentistId: doc.id,
             childName: `ชน${i}`, phone: "0900000000", lineIdToken: FAMILY, idempotencyKey: key(),
           }),
@@ -113,7 +113,7 @@ async function main() {
       const results = await timed(`${N} at once`, () =>
         Promise.all(
           Array.from({ length: N }, (_, i) =>
-            actions.bookAppointment({
+            actions.bookAppointment({ ageGroup: "kid",
               date, time: times[0], treatmentKey: "checkup", dentistId: null,
               childName: `พูล${i}`, phone: "0900000001", lineIdToken: FAMILY, idempotencyKey: key(),
             }),
@@ -168,7 +168,7 @@ async function main() {
     const results = await timed(`${N} copies`, () =>
       Promise.all(
         Array.from({ length: N }, () =>
-          actions.bookAppointment({
+          actions.bookAppointment({ ageGroup: "kid",
             date, time: times[0], treatmentKey: "checkup", dentistId: doc.id,
             childName: `ซ้ำ-${RUN}`, phone: "0900000004", lineIdToken: FAMILY, idempotencyKey: k,
           }),
@@ -181,7 +181,7 @@ async function main() {
     ok("…all with the same booking code", refs.size === 1, [...refs].join(","));
     const rows = (await queries.listAppointmentsBetween(date, date)).filter((x) => x.childName === `ซ้ำ-${RUN}`);
     ok("exactly 1 row in the database", rows.length === 1, `${rows.length} rows`);
-    const retry = await actions.bookAppointment({
+    const retry = await actions.bookAppointment({ ageGroup: "kid",
       date, time: times[0], treatmentKey: "checkup", dentistId: doc.id,
       childName: `ซ้ำ-${RUN}`, phone: "0900000004", lineIdToken: FAMILY, idempotencyKey: k,
     });

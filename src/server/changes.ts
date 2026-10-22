@@ -51,7 +51,14 @@ export async function currentChangeSeq(): Promise<number> {
 
 type Listener = (seq: number) => void;
 const hub = globalThis as unknown as {
-  __dkChanges?: { listeners: Set<Listener>; ready?: Promise<void>; conn?: ReturnType<typeof postgres> };
+  __dkChanges?: {
+    listeners: Set<Listener>;
+    ready?: Promise<void>;
+    conn?: ReturnType<typeof postgres>;
+    /** the newest number announced to screens */
+    lastSeq?: number;
+    watchdog?: ReturnType<typeof setInterval>;
+  };
 };
 
 /**
@@ -67,15 +74,25 @@ function state() {
   return (hub.__dkChanges ??= { listeners: new Set() });
 }
 
+/** tell every open screen this number (they refresh only if it's newer) */
+function broadcast(seq: number) {
+  const s = state();
+  s.lastSeq = Math.max(s.lastSeq ?? 0, seq);
+  for (const fn of s.listeners) fn(seq);
+}
+
 async function ensureListening(): Promise<void> {
   const s = state();
   if (!s.ready) {
     s.conn = postgres(directUrl(), { max: 1, idle_timeout: 0, onnotice: () => {} });
     s.ready = s.conn
-      .listen(CHANNEL, (payload) => {
-        const seq = Number(payload) || 0;
-        for (const fn of s.listeners) fn(seq);
-      })
+      .listen(
+        CHANNEL,
+        (payload) => broadcast(Number(payload) || 0),
+        // also runs after the connection drops and LISTEN is set up again —
+        // anything saved in the gap was never announced, so announce it now
+        () => void currentChangeSeq().then(broadcast),
+      )
       .then(() => undefined)
       .catch(async (e) => {
         // let the next screen try again rather than caching the failure
@@ -88,9 +105,31 @@ async function ensureListening(): Promise<void> {
   return s.ready;
 }
 
+/**
+ * Safety net: if LISTEN silently stopped (the driver re-listens once after a
+ * dropped connection, and gives up if the database is still away), screens
+ * would wait for the next reconnect. While anyone is listening, compare the
+ * saved change number every WATCH_MS and announce anything missed.
+ */
+const WATCH_MS = 30_000;
+function ensureWatchdog() {
+  const s = state();
+  if (s.watchdog) return;
+  s.watchdog = setInterval(() => {
+    if (s.listeners.size === 0) return;
+    currentChangeSeq()
+      .then((seq) => {
+        if (seq > (s.lastSeq ?? 0)) broadcast(seq);
+      })
+      .catch(() => {});
+  }, WATCH_MS);
+  s.watchdog.unref?.();
+}
+
 /** hear every change while subscribed; returns the unsubscribe */
 export async function subscribeChanges(fn: Listener): Promise<() => void> {
   await ensureListening();
+  ensureWatchdog();
   state().listeners.add(fn);
   return () => {
     state().listeners.delete(fn);

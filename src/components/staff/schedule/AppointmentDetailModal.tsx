@@ -214,21 +214,25 @@ export function AppointmentDetailModal({
     onClose();
   };
 
-  const handleSaveReschedule = () => {
+  const handleSaveReschedule = async () => {
     const moved = newDate !== appointment.date || newTime !== appointment.time;
-    if (appointment.dentistId === null && newDentist && !moved) {
-      // same slot, first dentist: guarded assign rejects a taken chair
-      assignDentist(appointment.id, newDentist);
-    } else {
-      rescheduleAppointment(appointment.id, newDate, newTime, newDentist);
-    }
-    if (editNotes !== appointment.notes) {
-      updateAppointment(appointment.id, { notes: editNotes.trim() });
-    }
     const changed = moved || newDentist !== appointment.dentistSlug;
-    if (changed && hasLine && notify && message.trim()) void messageFamily(appointment.id, message);
+    const text = message;
     setPanel(null);
     onClose();
+    // only notes edited: don't touch the slot (or the patient's queue status)
+    let saved = true;
+    if (appointment.dentistId === null && newDentist && !moved) {
+      // same slot, first dentist: guarded assign rejects a taken chair
+      saved = await assignDentist(appointment.id, newDentist);
+    } else if (changed) {
+      saved = await rescheduleAppointment(appointment.id, newDate, newTime, newDentist);
+    }
+    if (editNotes !== appointment.notes) {
+      await updateAppointment(appointment.id, { notes: editNotes.trim() });
+    }
+    // the family hears about the new time only after it is really saved
+    if (saved && changed && hasLine && notify && text.trim()) void messageFamily(appointment.id, text);
   };
 
   /** a booking without LINE: copy the reminder to paste into a chat by hand */

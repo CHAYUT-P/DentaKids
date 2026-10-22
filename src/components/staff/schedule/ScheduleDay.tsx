@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
 import { addDays, weekday, daysFrom, fmtLong, thaiDate } from "@/lib/dates";
@@ -44,11 +44,17 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
     walkinOpen,
     setWalkinOpen,
     onLeave,
+    appointmentsFrom,
+    loadHistory,
   } = useStaff();
   const dict = useT();
   const tr = useTreatments();
 
   const [selectedDate, setSelectedDate] = useState(today);
+  // further back than the download reaches → fetch the older visits once
+  useEffect(() => {
+    if (selectedDate < appointmentsFrom) loadHistory();
+  }, [selectedDate, appointmentsFrom, loadHistory]);
   const [selectedAppt, setSelectedAppt] = useState<StaffAppointment | null>(null);
   const [newBookingSlot, setNewBookingSlot] = useState<{
     date: string;
@@ -141,8 +147,11 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
   const cancelledCount = dayAppts.filter((a) => a.status === "cancelled").length;
   const waitingCount = waitlist.filter((w) => w.status === "waiting").length;
 
+  // a live booking wins over a cancelled one at the same time (cancelled, then
+  // rebooked) — otherwise the grid could show the cancelled card and hide it
   const getSlotAppt = (dentistSlug: string, time: string) => {
-    return dayAppts.find((a) => a.dentistSlug === dentistSlug && a.time === time);
+    const here = dayAppts.filter((a) => a.dentistSlug === dentistSlug && a.time === time);
+    return here.find((a) => a.status !== "cancelled") ?? here[0];
   };
 
   /** a longer booking that started earlier and still runs at this time */
@@ -295,13 +304,15 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
     `แจ้งเปลี่ยนเวลานัด 🦷\nนัดของ ${m.appt.childName} ย้ายเป็น ${thaiDate(m.date)} เวลา ${m.time} น.` +
     `\nกับ ${docName(m.dentistSlug)}\nรหัสจอง: ${m.appt.ref}\nหากไม่สะดวก ติดต่อคลินิกได้เลยค่ะ`;
 
-  const confirmMove = () => {
+  const confirmMove = async () => {
     if (!pendingMove) return;
     const m = pendingMove;
-    rescheduleAppointment(m.appt.id, m.date, m.time, m.dentistSlug);
+    setPendingMove(null);
+    // tell the family only once the move is saved — if the time was taken
+    // meanwhile, the toast says so and nobody was told a wrong time
+    if (!(await rescheduleAppointment(m.appt.id, m.date, m.time, m.dentistSlug))) return;
     if (notifyFamily && m.appt.hasLine) void messageFamily(m.appt.id, moveMessage(m));
     else showToast(`ย้ายนัด ${m.appt.childName} เป็น ${m.time} น. (${docName(m.dentistSlug)})`);
-    setPendingMove(null);
   };
 
   return (

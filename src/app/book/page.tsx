@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { services } from "@/data/services";
 import { nowMinutes, addDays, todayISO } from "@/lib/dates";
 import { toUIDentists } from "@/lib/convert";
-import { getChairs, getClinicInfo, listActiveDentists, listClinicDays, listHolidays, listTreatmentCatalog, slotLoadForDates, slotsForDate } from "@/server/queries";
+import { getBookingWindowDays, getChairs, getClinicInfo, listActiveDentists, listClinicDays, listHolidays, listTreatmentCatalog, slotLoadForDates, slotsForDates } from "@/server/queries";
 import { BookingFlow } from "@/components/patient/BookingFlow";
 import { TreatmentsProvider } from "@/lib/treatmentsContext";
 
@@ -13,8 +13,8 @@ export const metadata: Metadata = {
   description: "เลือกบริการ เลือกทันตแพทย์ แล้วเลือกวันและเวลาที่สะดวก",
 };
 
-/** the booking window the calendar shows — must match BookingFlow's WINDOW_DAYS */
-const WINDOW_DAYS = 14;
+/** days of availability sent with the page; months beyond load when opened */
+const FIRST_DAYS = 21;
 
 /**
  * `?t=` preselects a treatment (the home tiles and the services list link in
@@ -36,24 +36,19 @@ export default async function Page({ searchParams }: PageProps<"/book">) {
   const rawR = typeof q.r === "string" && /^[A-Za-z0-9-]{4,20}$/.test(q.r) ? q.r : undefined;
 
   const today = todayISO();
-  const [dentistRows, clinicDays, holidays, info] = await Promise.all([
+  const [dentistRows, clinicDays, holidays, info, windowDays] = await Promise.all([
     listActiveDentists(),
     listClinicDays(),
     listHolidays(),
     getClinicInfo(),
+    getBookingWindowDays(),
   ]);
 
-  // slot occupancy for every day the calendar can show
-  const dates = Array.from({ length: WINDOW_DAYS }, (_, i) => addDays(today, i));
-  const slotLists = await Promise.all(dates.map((d) => slotsForDate(d)));
-  const slots: Record<string, Awaited<ReturnType<typeof slotsForDate>>> = {};
-  dates.forEach((d, i) => {
-    slots[d] = slotLists[i];
-  });
-
-  // chair load per day/time for "any dentist" mode (admits while live < chairs)
-  // plus the chair count itself — one batch read for the whole window
-  const [load, chairs] = await Promise.all([slotLoadForDates(dates), getChairs()]);
+  // slot occupancy for the first weeks (up to the clinic's booking window) in
+  // one batch; the calendar fetches later months (bookingAvailability) when
+  // the family opens them. Chair load is for "any dentist" mode.
+  const dates = Array.from({ length: Math.min(windowDays, FIRST_DAYS) }, (_, i) => addDays(today, i));
+  const [slots, load, chairs] = await Promise.all([slotsForDates(dates), slotLoadForDates(dates), getChairs()]);
 
   // the clinic's treatment list (names, icons, prices, show/hide) — staff-edited
   const catalog = await listTreatmentCatalog();
@@ -75,6 +70,7 @@ export default async function Page({ searchParams }: PageProps<"/book">) {
       dentists={toUIDentists(dentistRows)}
       openDays={clinicDays.map((c) => ({ day: c.day, isOpen: c.isOpen }))}
       holidays={holidays.map((h) => ({ start: h.start, end: h.end, name: h.name }))}
+      windowDays={windowDays}
       slots={slots}
       load={load}
       chairs={chairs}

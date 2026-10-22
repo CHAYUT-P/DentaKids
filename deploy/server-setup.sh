@@ -61,8 +61,9 @@ cat > /etc/cron.d/dentakids <<CRON
 # inside the app container, so HTTPS redirects never get in the way
 0 11 * * * root cd $APP && $DC exec -T app wget -qO- --header="Authorization: Bearer ${CRON_SECRET}" "http://127.0.0.1:3000/api/cron/reminders?kind=day_before" >/dev/null 2>&1
 0 0 * * * root cd $APP && $DC exec -T app wget -qO- --header="Authorization: Bearer ${CRON_SECRET}" "http://127.0.0.1:3000/api/cron/reminders?kind=morning" >/dev/null 2>&1
-# database backup at 03:00 Bangkok, keep 14 days
-0 20 * * * root cd $APP && $DC exec -T db pg_dump -U dental dentalweb | gzip > backups/db-\$(date +\%F).sql.gz && find backups -name 'db-*.sql.gz' -mtime +14 -delete
+# database backup at 03:00 Bangkok, newest 14 good ones kept (deploy/backup.sh;
+# failures go to backups/backup.log and never delete a good backup)
+0 20 * * * root $APP/deploy/backup.sh
 CRON
 chmod 600 /etc/cron.d/dentakids
 

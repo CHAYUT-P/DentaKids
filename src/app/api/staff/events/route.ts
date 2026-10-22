@@ -24,7 +24,8 @@ const STREAM_MS = Math.max(10, Number(process.env.SSE_STREAM_SECONDS ?? 55)) * 1
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization",
+  // X-Staff-User: the full edition's signed-in person rides along
+  "Access-Control-Allow-Headers": "Authorization, X-Staff-User",
   // one preflight per day, not one per reconnect
   "Access-Control-Max-Age": "86400",
 };

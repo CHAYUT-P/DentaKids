@@ -41,6 +41,9 @@ export function BookingModal({
 
   const [date, setDate] = useState(initialDate || today);
   const [time, setTime] = useState(initialTime || "10:30");
+  /** saving: the form stays open until the server says yes, so a taken time
+   *  never loses what was typed */
+  const [saving, setSaving] = useState(false);
   const [dentistSlug, setDentistSlug] = useState(initialDentistSlug || dentists[0]?.slug || "naree");
   const [treatmentKey, setTreatmentKey] = useState<IconKey>("checkup");
   /** the name the family gives at the desk — a nickname is enough */
@@ -64,8 +67,9 @@ export function BookingModal({
       coveredTimes(a.time, a.durationMin).some((t) => need.has(t)),
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     if (!childName.trim()) {
       alert("กรุณากรอกชื่อที่ใช้จอง");
       return;
@@ -76,7 +80,8 @@ export function BookingModal({
     }
     if (clash) return;
 
-    createAppointment({
+    setSaving(true);
+    const saved = await createAppointment({
       date,
       time,
       durationMin: 30,
@@ -94,6 +99,8 @@ export function BookingModal({
       price: tr.get(treatmentKey).price ?? 0,
       forSelf: initialForSelf ?? false,
     }, { idempotencyKey: saveKey });
+    setSaving(false);
+    if (!saved) return; // the toast said why; fix the time and save again
 
     if (onCreated) onCreated();
     onClose();
@@ -264,9 +271,9 @@ export function BookingModal({
             <button type="button" className="btn-secondary-staff" onClick={onClose}>
               ยกเลิก
             </button>
-            <button type="submit" className="btn-primary-staff" disabled={!!clash}>
+            <button type="submit" className="btn-primary-staff" disabled={!!clash || saving}>
               <IconPlus size={15} />
-              <span>บันทึกการจอง</span>
+              <span>{saving ? "กำลังบันทึก…" : "บันทึกการจอง"}</span>
             </button>
           </div>
         </form>

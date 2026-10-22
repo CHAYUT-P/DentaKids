@@ -124,6 +124,8 @@ async function call<T>(action: string, args: unknown[] = []): Promise<T> {
 export interface StaffBootstrap {
   today: string;
   appointments: StaffAppointment[];
+  /** the first date `appointments` covers — older ones via staffAppointmentsBefore */
+  appointmentsFrom: string;
   dentists: EditableDentist[];
   patients: PatientRecord[];
   waitlist: WaitlistEntry[];
@@ -137,7 +139,7 @@ export interface StaffBootstrap {
   lineUnread: number;
   /** the change number this data is current to (live updates) */
   changeSeq: number;
-  settings: { chairs: number };
+  settings: { chairs: number; bookingWindowDays: number };
   clinicInfo: {
     phone: string;
     phoneDisplay: string;
@@ -207,6 +209,14 @@ export function assignPoolDentist(id: number, dentistId: number) {
 
 export function staffUpdateChairs(chairs: number) {
   return call<void>("updateChairs", [chairs]);
+}
+
+export function staffUpdateBookingWindow(days: number) {
+  return call<number>("updateBookingWindow", [days]);
+}
+
+export function staffAppointmentsBefore(date: string) {
+  return call<StaffAppointment[]>("appointmentsBefore", [date]);
 }
 
 /* ── dentists / patients / waitlist ─────────────────────────────────────── */

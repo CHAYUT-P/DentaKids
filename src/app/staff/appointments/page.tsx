@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type EditableDentist, type StaffAppointment } from "@/lib/staffStore";
 import { canTreat } from "@/lib/convert";
@@ -21,7 +21,7 @@ import { AgeTag } from "@/components/staff/shell/AgeTag";
 type RangeFilter = "today" | "upcoming" | "past" | "all";
 
 export default function StaffAppointmentsPage() {
-  const { today, appointments, dentists, updateStatus, assignDentist, settings } = useStaff();
+  const { today, appointments, dentists, updateStatus, assignDentist, settings, loadHistory } = useStaff();
   const tr = useTreatments();
 
   const [range, setRange] = useState<RangeFilter>("today");
@@ -31,6 +31,11 @@ export default function StaffAppointmentsPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   const [selectedAppt, setSelectedAppt] = useState<StaffAppointment | null>(null);
+
+  // past visits and searches reach further back than the download → fetch once
+  useEffect(() => {
+    if ((range !== "today" && range !== "upcoming") || searchQuery.trim()) loadHistory();
+  }, [range, searchQuery, loadHistory]);
 
   // Filter appointments
   const filtered = useMemo(() => {

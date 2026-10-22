@@ -34,7 +34,7 @@ async function main() {
   const freeTimes = [...new Set(allSlots.filter((s) => !s.taken).map((s) => s.time))].sort();
   const time = freeTimes.find((t) => t >= "14:00") ?? freeTimes[0];
   console.log(`  (using ${date} at ${time})`);
-  const result = await actions.bookAppointment({
+  const result = await actions.bookAppointment({ ageGroup: "kid",
     date, time, treatmentKey: "fluoride",
     dentistId: null, // "any dentist" — the UI's default choice
     // the patient site sends only the name to give at the desk + a phone
@@ -79,7 +79,7 @@ async function main() {
   ok("other dentists still free", others.length > 0);
 
   console.log("\n— 4. Double-booking refused, specific bypasses pool —");
-  const clash = await actions.bookAppointment({
+  const clash = await actions.bookAppointment({ ageGroup: "kid",
     date, time, treatmentKey: "checkup",
     dentistId,
     childName: "น้องชนกัน", guardianName: "คุณชน", phone: "0988888888", forSelf: false,
@@ -146,7 +146,7 @@ async function main() {
     const grid = (await queries.slotsForDate(d3)).filter((r) => r.dentistId === doc.id);
     ok(`${b} and ${c} both taken`, [b, c].every((t) => grid.find((r) => r.time === t)?.taken));
     ok(`${dd} still free`, grid.find((r) => r.time === dd)?.taken === false);
-    const second = await actions.bookAppointment({
+    const second = await actions.bookAppointment({ ageGroup: "kid",
       date: d3, time: c, treatmentKey: "checkup", dentistId: doc.id,
       childName: "ชนครึ่งหลัง", phone: "0933333333", lineIdToken: FAMILY,
     });
@@ -209,6 +209,53 @@ async function main() {
   ok("slot freed for others", freed?.taken === false);
   const cancelNotifs = await queries.listNotifications();
   ok("staff told about cancellation", cancelNotifs.some(n => n.type === "cancellation" && n.refCode === result.ref));
+
+  console.log("\n— 9. Booking window (how far ahead families may book) —");
+  const savedWindow = await queries.getBookingWindowDays();
+  let far = addDays(today, 300);
+  while (![2, 3, 5, 6].includes(weekdayIndex(far))) far = addDays(far, 1);
+  const farTime = [...new Set((await queries.slotsForDate(far)).filter((s) => !s.taken).map((s) => s.time))].sort()[0];
+  await actions.staffUpdateBookingWindow(14);
+  const tooFar = await actions.bookAppointment({ ageGroup: "kid",
+    date: far, time: farTime, treatmentKey: "fluoride", dentistId: null,
+    childName: "น้องไกล", phone: "0912345678", lineIdToken: FAMILY,
+  });
+  ok("14-day window: the server refuses a date 10 months ahead", !tooFar.ok, JSON.stringify(tooFar));
+  ok("14-day window: no hold that far ahead either", !(await actions.holdSlot({ date: far, time: farTime, treatmentKey: "fluoride", dentistId: null })).ok);
+  const farMonth = far.slice(0, 8) + "01";
+  ok("14-day window: the calendar gets no days that far ahead", Object.keys((await actions.bookingAvailability(farMonth))?.slots ?? {}).length === 0);
+  await actions.staffUpdateBookingWindow(365);
+  ok("window saved as 1 year", (await queries.getBookingWindowDays()) === 365);
+  ok("1-year window: the calendar loads that month", far in ((await actions.bookingAvailability(farMonth))?.slots ?? {}));
+  const yearAhead = await actions.bookAppointment({ ageGroup: "kid",
+    date: far, time: farTime, treatmentKey: "fluoride", dentistId: null,
+    childName: "น้องไกล", phone: "0912345678", lineIdToken: FAMILY,
+  });
+  ok(`1-year window: booking ${far} works`, yearAhead.ok, JSON.stringify(yearAhead));
+  if (yearAhead.ref) await actions.cancelBooking(yearAhead.ref, FAMILY);
+  await actions.staffUpdateBookingWindow(400);
+  ok("never more than a year", (await queries.getBookingWindowDays()) === 365);
+  await actions.staffUpdateBookingWindow(savedWindow);
+
+  console.log("\n— 10. Availability in one batch, staff download slimmed —");
+  const days14 = Array.from({ length: 14 }, (_, i) => addDays(today, i));
+  const batch = await queries.slotsForDates(days14);
+  const oneByOne = await Promise.all(days14.map((d) => queries.slotsForDate(d)));
+  ok("batched slots equal the day-by-day answer", days14.every((d, i) => JSON.stringify(batch[d]) === JSON.stringify(oneByOne[i])));
+  const boot = await actions.staffBootstrap();
+  // older rows ride along only when changed in the last day
+  const { db } = await import("../src/db/client");
+  const { sql } = await import("drizzle-orm");
+  const stale = await db.execute<{ id: number }>(
+    sql`select id from appointment where date < ${boot.appointmentsFrom} and updated_at < now() - interval '1 day'`,
+  );
+  const staleIds = new Set([...stale].map((r) => String(r.id)));
+  ok(
+    "staff download: from 30 days back, older only if changed in the last day",
+    boot.appointmentsFrom === addDays(today, -30) && !boot.appointments.some((a) => staleIds.has(String(a.id))),
+  );
+  const older = await actions.staffAppointmentsBefore(boot.appointmentsFrom);
+  ok("older history loads separately, only before that date", older.every((a) => a.date < boot.appointmentsFrom));
 
   console.log(`\n═══ ${passed} passed, ${failed} failed ═══\n`);
   process.exit(failed ? 1 : 0);

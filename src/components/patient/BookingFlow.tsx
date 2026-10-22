@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 
 import type { Dentist } from "@/data/dentists";
 import { iconGroups, type IconKey } from "@/data/icons";
@@ -24,7 +24,7 @@ import { dentistsForUI } from "@/lib/convert";
 import { useLine } from "@/lib/useLine";
 import { isAgeGroup, type AgeGroup } from "@/lib/ageGroup";
 import { coveredTimes, durationTh, slotsNeeded, timeRange } from "@/lib/slots";
-import { bookAppointment, holdSlot, releaseSlotHold, rescheduleBooking } from "@/server/actions";
+import { bookAppointment, bookingAvailability, holdSlot, releaseSlotHold, rescheduleBooking, type BookResult } from "@/server/actions";
 import type { SlotRow } from "@/server/queries";
 import { Check, Chevron, ChevronLeft } from "@/components/shared/icons";
 import { Mascot } from "@/components/shared/Mascot";
@@ -56,9 +56,6 @@ import { newIdempotencyKey } from "@/lib/idempotency";
  */
 
 type Step = 1 | 2 | 3 | 4;
-
-/** how far ahead the calendar lets a family pick */
-const WINDOW_DAYS = 14;
 
 /** the clinic wants an hour's notice, so today's next slot is an hour out */
 const LEAD = 60;
@@ -126,7 +123,10 @@ export interface BookingFlowProps {
   openDays: { day: string; isOpen: boolean }[];
   /** special closed dates from holiday */
   holidays: { start: string; end: string; name: string }[];
-  /** per-date slot occupancy inside the booking window, keyed by YYYY-MM-DD */
+  /** how far ahead families may book — the clinic sets it (up to a year) */
+  windowDays: number;
+  /** per-date slot occupancy for the first weeks of the window, keyed by
+   *  YYYY-MM-DD; later months load when the calendar opens them */
   slots: Record<string, SlotRow[]>;
   /** chair load per date/time for "any dentist" mode: admits while live < chairs */
   load: Record<string, Record<string, { live: number; pool: number }>>;
@@ -262,6 +262,8 @@ function startTimes(
 
 function DayCalendar({
   today,
+  windowDays,
+  onMonth,
   date,
   onPick,
   openDays,
@@ -274,6 +276,9 @@ function DayCalendar({
   durationMin,
 }: {
   today: string;
+  windowDays: number;
+  /** the calendar now shows this month (YYYY-MM-01) — load it if needed */
+  onMonth: (month: string) => void;
   date: string | null;
   onPick: (iso: string) => void;
   openDays: { day: string; isOpen: boolean }[];
@@ -289,10 +294,13 @@ function DayCalendar({
   durationMin: number;
 }) {
   const { t, lang } = useLang();
-  const lastDay = addDays(today, WINDOW_DAYS - 1);
+  const lastDay = addDays(today, windowDays - 1);
   const firstMonth = monthStart(today);
   const lastMonth = monthStart(lastDay);
   const [view, setView] = useState(firstMonth);
+  useEffect(() => {
+    onMonth(view);
+  }, [view, onMonth]);
 
   const closedWeekday = new Map(openDays.map((d) => [d.day, !d.isOpen]));
   const holidayOn = (iso: string) => holidays.find((h) => iso >= h.start && iso <= h.end)?.name;
@@ -336,6 +344,8 @@ function DayCalendar({
         {cells.map((iso, i) => {
           if (iso === null) return <span key={`pad${i}`} aria-hidden="true" />;
           const out = iso < today || iso > lastDay;
+          // inside the window but still loading (a month further ahead)
+          const waiting = !out && !(iso in slots);
           const holidayName = holidayOn(iso);
           const closed = !out && (closedWeekday.get(weekday(iso)) === true || holidayName !== undefined);
           const daySlots = slots[iso] ?? [];
@@ -347,9 +357,9 @@ function DayCalendar({
             dentist === null
               ? daySlots.filter((s) => s.dentistSlug !== null && capable.has(s.dentistSlug))
               : daySlots.filter((s) => s.dentistSlug === dentist);
-          const off = !out && !closed && mine.length === 0;
+          const off = !out && !waiting && !closed && mine.length === 0;
           const full =
-            !out && !closed && !off &&
+            !out && !waiting && !closed && !off &&
             startTimes(daySlots, dayLoad, chairs, dentist, capable, durationMin, () => false).length === 0;
           return (
             <button
@@ -357,8 +367,8 @@ function DayCalendar({
               type="button"
               className={`calDay${iso === today ? " today" : ""}${date === iso ? " on" : ""}${
                 closed ? " off" : ""
-              }${off ? " off" : ""}${full ? " full" : ""}${out ? " out" : ""}`}
-              disabled={out || closed || off || full}
+              }${off ? " off" : ""}${full ? " full" : ""}${out ? " out" : ""}${waiting ? " out" : ""}`}
+              disabled={out || waiting || closed || off || full}
               onClick={() => onPick(iso)}
               title={holidayName ?? undefined}
             >
@@ -377,7 +387,35 @@ function DayCalendar({
 /* ═══════════════════════════════ the flow itself ═════════════════════════ */
 
 export function BookingFlow(props: BookingFlowProps) {
-  const { today, nowMin, dentists, openDays, holidays, slots, load, chairs, popular } = props;
+  const { today, nowMin, dentists, openDays, holidays, chairs, popular, windowDays } = props;
+  /* availability: the first weeks came with the page; each further month is
+     fetched once, the first time the calendar shows it */
+  const [slots, setSlots] = useState(props.slots);
+  const [load, setLoad] = useState(props.load);
+  const [monthErr, setMonthErr] = useState(false);
+  const asked = useRef(new Set<string>());
+  const loadMonth = useCallback(
+    (month: string) => {
+      const last = addDays(today, windowDays - 1);
+      const wanted = Array.from({ length: daysInMonth(month) }, (_, i) => addDays(month, i)).filter(
+        (d) => d >= today && d <= last,
+      );
+      if (wanted.every((d) => d in slots) || asked.current.has(month)) return;
+      asked.current.add(month);
+      setMonthErr(false);
+      bookingAvailability(month)
+        .then((res) => {
+          if (!res) throw new Error("no data");
+          setSlots((s) => ({ ...s, ...res.slots }));
+          setLoad((l) => ({ ...l, ...res.load }));
+        })
+        .catch(() => {
+          asked.current.delete(month); // let the next visit to this month retry
+          setMonthErr(true);
+        });
+    },
+    [today, windowDays, slots],
+  );
   const tr = useTreatments();
   const { t, lang } = useLang();
 
@@ -460,8 +498,13 @@ export function BookingFlow(props: BookingFlowProps) {
     return `${p.toLocaleString("en-US")} ${t.common.baht}`;
   };
 
+  /** which hold request is the current one: a reply to an older tap (two
+   *  times tapped quickly) is stale — its hold is released, never kept */
+  const holdSeq = useRef(0);
+
   /** drop the current slot reservation — the picked slot is about to change */
   function clearHold() {
+    holdSeq.current += 1;
     if (holdToken) void releaseSlotHold(holdToken);
     setHoldToken(null);
   }
@@ -474,14 +517,24 @@ export function BookingFlow(props: BookingFlowProps) {
     setBookErr(null);
     if (!treatment || !date) return;
     const dentistId = dentist ? (dentists.find((d) => d.slug === dentist)?.id ?? null) : null;
-    void holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId, ageGroup: group }).then((r) => {
-      if (r.ok && r.token) {
-        setHoldToken(r.token);
-      } else {
-        setTime(null);
-        setBookErr(t.booking.slotTaken);
-      }
-    });
+    const mine = holdSeq.current;
+    holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId, ageGroup: group })
+      .then((r) => {
+        if (mine !== holdSeq.current) {
+          // the family has tapped something else since — let this slot go
+          if (r.ok && r.token) void releaseSlotHold(r.token);
+          return;
+        }
+        if (r.ok && r.token) {
+          setHoldToken(r.token);
+        } else {
+          setTime(null);
+          setBookErr(t.booking.slotTaken);
+        }
+      })
+      .catch(() => {
+        // no answer (connection): keep the pick; confirming still checks the slot
+      });
   }
 
   function pickTreatment(k: TreatmentKey) {
@@ -547,6 +600,8 @@ export function BookingFlow(props: BookingFlowProps) {
     setContactErr(null);
     setBookErr(null);
     startBooking(async () => {
+      // a dropped connection must not crash the page: say so, and a retry
+      // sends the same key, so it can never book twice
       const result = await bookAppointment({
         date,
         time,
@@ -558,7 +613,7 @@ export function BookingFlow(props: BookingFlowProps) {
         holdToken: holdToken ?? undefined,
         lineIdToken: line.token ?? undefined,
         idempotencyKey: bookKey,
-      });
+      }).catch((): BookResult => ({ ok: false, error: "network" }));
       if (result.ok && result.ref) {
         setHoldToken(null);
         saveContact(bookName.trim(), contactTel);
@@ -567,6 +622,7 @@ export function BookingFlow(props: BookingFlowProps) {
         setBookErr(
           result.error === "slot_taken" ? t.booking.slotTaken
           : result.error === "line" ? t.booking.errLine
+          : result.error === "network" ? t.booking.errNetwork
           : t.booking.bookError,
         );
       }
@@ -585,7 +641,7 @@ export function BookingFlow(props: BookingFlowProps) {
         date,
         time,
         holdToken: holdToken ?? undefined,
-      });
+      }).catch((): BookResult => ({ ok: false, error: "network" }));
       if (result.ok && result.ref) {
         setHoldToken(null);
         setMovedChild(handoff?.childName ?? null);
@@ -596,7 +652,11 @@ export function BookingFlow(props: BookingFlowProps) {
         }
         setConfirmedRef(result.ref);
       } else {
-        setBookErr(result.error === "slot_taken" ? t.booking.slotTaken : t.booking.reschedError);
+        setBookErr(
+          result.error === "slot_taken" ? t.booking.slotTaken
+          : result.error === "network" ? t.booking.errNetwork
+          : t.booking.reschedError,
+        );
       }
     });
   }
@@ -787,6 +847,8 @@ export function BookingFlow(props: BookingFlowProps) {
               <Eyebrow>{t.booking.pickDate}</Eyebrow>
               <DayCalendar
                 today={today}
+                windowDays={windowDays}
+                onMonth={loadMonth}
                 date={date}
                 onPick={(iso) => {
                   clearHold();
@@ -802,6 +864,7 @@ export function BookingFlow(props: BookingFlowProps) {
                 chairs={chairs}
                 durationMin={durationMin}
               />
+              {monthErr ? <p className="err">{t.booking.monthLoadFailed}</p> : null}
               <p className="hint">{t.booking.closedDay}</p>
 
               {date ? (
@@ -829,7 +892,7 @@ export function BookingFlow(props: BookingFlowProps) {
                 </>
               ) : null}
 
-              {resched && bookErr ? <p className="err">{bookErr}</p> : null}
+              {bookErr ? <p className="err">{bookErr}</p> : null}
 
               <div className="stickyBar">
                 <div className="sbText">

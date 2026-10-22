@@ -69,7 +69,8 @@ Then holding a steady rate for 30 s (`steady`), and an overload ramp to 400/s
 | 50 → 400 | 8.2 s | 40.2 s | 0.05% (7 page timeouts) | no (~57/s served) |
 
 **One server process handles about 30–35 families per second** (90–105
-requests/s) at well under 0.1 s. At 40/s both the Node process and Postgres
+requests/s) at well under 0.1 s. *(Fixed afterwards: [design/06](06-faster-availability.md)
+batches the availability queries, which doubled this to ~60–70.)* At 40/s both the Node process and Postgres
 were at about one full CPU core each (measured with `ps` and `docker stats`).
 Node runs JavaScript on a single core, and the `/book` page is the heaviest
 request because it works out two weeks of availability on every visit.

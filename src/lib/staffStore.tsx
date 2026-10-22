@@ -34,6 +34,8 @@ import {
   staffSetWaitlistStatus,
   staffUpdateAppointment,
   staffUpdateChairs,
+  staffUpdateBookingWindow,
+  staffAppointmentsBefore,
   staffUpdateClinicInfo,
   staffUpdateDay,
   staffUpdateDentist,
@@ -117,25 +119,36 @@ export interface StaffContextType {
   servicePrices: Record<IconKey, number | null>;
   schedule: ClinicDaySetting[];
   holidays: { id: number; start: string; end: string; name: string }[];
-  /** booking-rules knobs (chairs caps one wall-clock slot) */
-  settings: { chairs: number };
+  /** booking-rules knobs: chairs caps one wall-clock slot; how many days
+   *  ahead families may book on the website */
+  settings: { chairs: number; bookingWindowDays: number };
   updateChairs: (chairs: number) => void;
+  updateBookingWindow: (days: number) => void;
+  /** `appointments` holds everything from this date on; older visits load
+   *  with loadHistory() when a screen needs them */
+  appointmentsFrom: string;
+  historyLoaded: boolean;
+  loadHistory: () => void;
   /** the clinic's saved contact details (phone, LINE, address, map) */
   clinicInfo: StaffBootstrap["clinicInfo"];
   updateClinicInfo: (patch: Parameters<typeof staffUpdateClinicInfo>[0]) => void;
-  /** hand a pooled ("any dentist") booking to a dentist */
-  assignDentist: (id: string, dentistSlug: string) => void;
+  /** hand a pooled ("any dentist") booking to a dentist; true once saved */
+  assignDentist: (id: string, dentistSlug: string) => Promise<boolean>;
   // Actions — same names the UI already calls; each writes to Postgres
+  /** resolves true once saved; false = the time was taken or the save failed
+   *  (a toast already said which) — keep the form open then */
   createAppointment: (
     data: Omit<StaffAppointment, "id" | "ref" | "createdAt" | "dentistId">,
     /** one key per "new appointment" window — a double click saves once */
     opts?: { idempotencyKey?: string },
-  ) => StaffAppointment;
-  updateAppointment: (id: string, updates: Partial<StaffAppointment>) => void;
+  ) => Promise<boolean>;
+  /** resolves true once saved — false if it failed (a toast already said so) */
+  updateAppointment: (id: string, updates: Partial<StaffAppointment>) => Promise<boolean>;
   updateStatus: (id: string, status: AppointmentStatus) => void;
   /** queue transitions — check-in stamps the clinic clock server-side */
   setQueueStatus: (id: string, status: "confirmed" | "arrived" | "in_chair" | "completed" | "no_show") => void;
-  rescheduleAppointment: (id: string, date: string, time: string, dentistSlug?: string) => void;
+  /** resolves true once the move is saved — tell the family only then */
+  rescheduleAppointment: (id: string, date: string, time: string, dentistSlug?: string) => Promise<boolean>;
   /** push a message into the family's LINE chat; resolves with what happened (and toasts it) */
   messageFamily: (id: string, text: string) => Promise<FamilyMessageResult>;
   deleteAppointment: (id: string) => void;
@@ -205,7 +218,25 @@ function withDefaults(b: StaffBootstrap): StaffBootstrap {
     notifications: b.notifications ?? [],
     lineUnread: b.lineUnread ?? 0,
     changeSeq: b.changeSeq ?? 0,
+    // an older server sends every appointment ever
+    appointmentsFrom: b.appointmentsFrom ?? "0000-01-01",
+    settings: { chairs: b.settings?.chairs ?? 3, bookingWindowDays: b.settings?.bookingWindowDays ?? 14 },
   };
+}
+
+/**
+ * A fresh download replaces everything from its `appointmentsFrom` on; older
+ * appointments this screen already has (history it loaded, or a day that just
+ * rolled out of the window) stay, unless the download sent a newer copy.
+ */
+function mergeFresh(prev: StaffBootstrap, fresh: StaffBootstrap): StaffBootstrap {
+  const next = withDefaults(fresh);
+  // a slow download that left before a newer one must not roll the screen back
+  if (next.changeSeq < (prev.changeSeq ?? 0) && next.today === prev.today) return prev;
+  // the download also carries older appointments changed lately — those win
+  const sent = new Set(next.appointments.map((a) => a.id));
+  const older = prev.appointments.filter((a) => a.date < next.appointmentsFrom && !sent.has(a.id));
+  return older.length ? { ...next, appointments: [...older, ...next.appointments] } : next;
 }
 
 export function StaffProvider({
@@ -246,15 +277,22 @@ export function StaffProvider({
    * as a toast; the UI stays usable because state only changes on success.
    */
   const mutate = useCallback(
-    async (what: string, fn: () => Promise<unknown>) => {
+    async (what: string, fn: () => Promise<unknown>): Promise<boolean> => {
       setSyncing(true);
       try {
         await fn();
         const fresh = await staffBootstrap();
-        setState(withDefaults(fresh));
+        setState((prev) => mergeFresh(prev, fresh));
+        return true;
       } catch (e) {
         console.error(e);
         showToast(`ข้อผิดพลาด: ${what} ไม่สำเร็จ`);
+        // anything shown before the save (a typed price, a ticked box) goes
+        // back to what the server really has
+        staffBootstrap()
+          .then((fresh) => setState((prev) => mergeFresh(prev, fresh)))
+          .catch(() => {});
+        return false;
       } finally {
         setSyncing(false);
       }
@@ -265,7 +303,7 @@ export function StaffProvider({
   /** silent re-fetch — the poll and manual refresh share this */
   const refresh = useCallback(() => {
     staffBootstrap()
-      .then((fresh) => setState(withDefaults(fresh)))
+      .then((fresh) => setState((prev) => mergeFresh(prev, fresh)))
       .catch(() => {});
   }, []);
 
@@ -317,6 +355,16 @@ export function StaffProvider({
     };
   }, [refresh]);
 
+  // a console left open overnight: when the clinic's date changes, download
+  // again so วันนี้ shows the new day (live updates only fire on a save)
+  const shownDay = state.today;
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (todayISO() !== shownDay) refresh();
+    }, 60_000);
+    return () => clearInterval(tick);
+  }, [shownDay, refresh]);
+
   const setDeviceMode = useCallback((mode: DeviceMode) => {
     setDeviceModeState(mode);
     try {
@@ -348,17 +396,8 @@ export function StaffProvider({
     (
       data: Omit<StaffAppointment, "id" | "ref" | "createdAt" | "dentistId">,
       opts?: { idempotencyKey?: string },
-    ): StaffAppointment => {
-      // optimistic shell so the modal can close at once; the real row lands
-      // with the refresh a moment later (ref may differ if of a race)
-      const optimistic: StaffAppointment = {
-        ...data,
-        dentistId: null,
-        id: `pending-${Date.now()}`,
-        ref: "…",
-        createdAt: data.date,
-      };
-      void mutate("บันทึกนัดหมาย (เวลานี้อาจชนกับนัดอื่น)", async () => {
+    ): Promise<boolean> => {
+      return mutate("บันทึกนัดหมาย (เวลานี้อาจชนกับนัดอื่น)", async () => {
         const ref = await staffCreateAppointment({
           date: data.date,
           time: data.time,
@@ -375,7 +414,6 @@ export function StaffProvider({
         // null = the slot (or part of a longer treatment's time) was taken
         if (!ref) throw new Error("slot_taken");
       });
-      return optimistic;
     },
     [mutate, slugToId],
   );
@@ -383,8 +421,8 @@ export function StaffProvider({
   const updateAppointment = useCallback(
     (id: string, updates: Partial<StaffAppointment>) => {
       const numeric = Number(id);
-      if (!Number.isFinite(numeric)) return; // optimistic shell, not yet persisted
-      void mutate("แก้ไขนัดหมาย", () =>
+      if (!Number.isFinite(numeric)) return Promise.resolve(false);
+      return mutate(updates.date || updates.time || updates.dentistSlug ? "ย้ายนัด (เวลานั้นอาจไม่ว่างแล้ว)" : "แก้ไขนัดหมาย", () =>
         staffUpdateAppointment(numeric, {
           date: updates.date,
           time: updates.time,
@@ -419,9 +457,14 @@ export function StaffProvider({
 
   const rescheduleAppointment = useCallback(
     (id: string, date: string, time: string, dentistSlug?: string) => {
-      updateAppointment(id, { date, time, dentistSlug, status: "confirmed" });
+      // a no-show given a new time is expected again; anyone checked in or in
+      // the chair keeps their place (a cancelled one stays cancelled — the
+      // server refuses to move it)
+      const current = state.appointments.find((a) => a.id === id);
+      const status = current?.status === "no_show" ? "confirmed" : undefined;
+      return updateAppointment(id, { date, time, dentistSlug, status });
     },
-    [updateAppointment],
+    [updateAppointment, state.appointments],
   );
 
   const messageFamily = useCallback(
@@ -643,10 +686,14 @@ export function StaffProvider({
     (id: string, dentistSlug: string) => {
       const numeric = Number(id);
       const dentistId = slugToId.get(dentistSlug);
-      if (!Number.isFinite(numeric) || dentistId === undefined) return;
-      void mutate("จัดแพทย์", async () => {
+      if (!Number.isFinite(numeric) || dentistId === undefined) return Promise.resolve(false);
+      let taken = false;
+      return mutate("จัดแพทย์", async () => {
         const res = await assignPoolDentist(numeric, dentistId);
-        if (!res.ok) showToast("เวลานั้นไม่ว่างแล้ว กรุณาเลือกแพทย์ท่านอื่น");
+        taken = !res.ok;
+      }).then((saved) => {
+        if (taken) showToast("เวลานั้นไม่ว่างแล้ว กรุณาเลือกแพทย์ท่านอื่น");
+        return saved && !taken;
       });
     },
     [mutate, slugToId, showToast],
@@ -757,6 +804,41 @@ export function StaffProvider({
     [mutate],
   );
 
+  const updateBookingWindow = useCallback(
+    (days: number) => {
+      setState((s) => ({ ...s, settings: { ...s.settings, bookingWindowDays: days } }));
+      void mutate("บันทึกระยะจองล่วงหน้า", () => staffUpdateBookingWindow(days));
+    },
+    [mutate],
+  );
+
+  /* older appointments: one download, the first time a screen needs them
+     (search, past list, a patient's visits, the schedule further back) */
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const historyLoading = useRef(false);
+  const loadHistory = useCallback(() => {
+    if (historyLoaded || historyLoading.current) return;
+    historyLoading.current = true;
+    staffAppointmentsBefore(state.appointmentsFrom)
+      .then((older) => {
+        setState((s) => {
+          // rows the screen already has (recent changes) are as new or newer
+          const have = new Set(s.appointments.map((a) => a.id));
+          return {
+            ...s,
+            appointments: [...older.filter((a) => !have.has(a.id)), ...s.appointments],
+            // the screen now holds everything; later downloads keep it (mergeFresh)
+            appointmentsFrom: "0000-01-01",
+          };
+        });
+        setHistoryLoaded(true);
+      })
+      .catch(() => showToast("โหลดประวัตินัดเก่าไม่สำเร็จ — ลองใหม่อีกครั้ง"))
+      .finally(() => {
+        historyLoading.current = false;
+      });
+  }, [historyLoaded, state.appointmentsFrom, showToast]);
+
   const updateChairs = useCallback(
     (chairs: number) => {
       const n = Number.isFinite(chairs) && chairs > 0 ? Math.floor(chairs) : 3;
@@ -816,8 +898,12 @@ export function StaffProvider({
       servicePrices: state.servicePrices,
       schedule: asClinicSchedule(state.schedule),
       holidays: state.holidays,
-      settings: state.settings ?? { chairs: 3 },
+      settings: state.settings,
       updateChairs,
+      updateBookingWindow,
+      appointmentsFrom: state.appointmentsFrom,
+      historyLoaded,
+      loadHistory,
       clinicInfo: state.clinicInfo ?? null,
       updateClinicInfo,
       assignDentist,
@@ -869,7 +955,7 @@ export function StaffProvider({
       deleteAppointment, updateDentist, createDentist, createPatient, updatePatient, addPatientChild,
       addWaitlist, updateWaitlistStatus, assignWaitingDentist, removeWaitlist, updateServicePrice, createTreatment, updateTreatment, setAllShowPrice, addDentistLeave, removeDentistLeave, onLeave,
       saveVisitRecord, finishVisit, refresh,
-      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateClinicInfo, assignDentist,
+      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateBookingWindow, historyLoaded, loadHistory, updateClinicInfo, assignDentist,
       markAllNotificationsRead, simulateOnlineBooking,
     ],
   );

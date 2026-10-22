@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { appointment, guardian, messageLog } from "@/db/schema";
+import { appointment, errorEvent, guardian, messageLog, rateLimit, slotHold } from "@/db/schema";
 import { addDays, thaiDate, todayISO } from "@/lib/dates";
 import { timeRange } from "@/lib/slots";
 import { pushLineText } from "@/server/line";
@@ -82,17 +82,30 @@ export async function GET(request: NextRequest) {
   let failed = 0;
   for (const a of rows) {
     if (already.has(a.id) || !a.lineUserId) continue;
-    const sentOk = await pushLineText(a.lineUserId, text(kind, a));
-    if (sentOk) {
-      await db.insert(messageLog).values({
-        appointmentId: a.id,
-        kind,
-        lineResponse: { to: a.lineUserId },
-      });
-      ok++;
-    } else {
-      failed++;
-    }
+    const to = a.lineUserId;
+    // one sender per booking and kind: Vercel can deliver the same cron twice,
+    // so take a lock, look again, then send and log in the same step
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`remind:${kind}:${a.id}`}))`);
+      const [done] = await tx
+        .select({ id: messageLog.id })
+        .from(messageLog)
+        .where(and(eq(messageLog.kind, kind), eq(messageLog.appointmentId, a.id)));
+      if (done) return "skipped" as const;
+      if (!(await pushLineText(to, text(kind, a)))) return "failed" as const;
+      await tx.insert(messageLog).values({ appointmentId: a.id, kind, lineResponse: { to } });
+      return "sent" as const;
+    });
+    if (result === "sent") ok++;
+    if (result === "failed") failed++;
+  }
+
+  // daily housekeeping (the morning run): tables that would otherwise only
+  // grow — expired rate-limit counters and holds, errors not seen for 90 days
+  if (kind === "reminder_morning") {
+    await db.delete(rateLimit).where(lt(rateLimit.resetAt, new Date(Date.now() - 24 * 3600_000)));
+    await db.delete(slotHold).where(lt(slotHold.expiresAt, new Date(Date.now() - 24 * 3600_000)));
+    await db.delete(errorEvent).where(lt(errorEvent.lastSeen, new Date(Date.now() - 90 * 24 * 3600_000)));
   }
 
   return NextResponse.json({ kind, date: target, found: rows.length, sent: ok, failed });

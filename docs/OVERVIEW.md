@@ -94,7 +94,8 @@ docs/                     this file, design notes (docs/design/), deployment gui
 ## 5. What families and staff can do (feature list)
 
 - **Website:** kid/adult → treatment → dentist (or "any dentist") → calendar
-  (closed days, dentist leave and full days greyed out) → time → name + phone →
+  (as far ahead as the clinic allows, up to a year; closed days, dentist leave
+  and full days greyed out) → time → name + phone →
   booked, with a LINE confirmation. My bookings (via LINE), move or cancel with
   a confirm step, the clinic's messages (bell), dentist profiles with photos,
   services with show/hide prices, clinic page with hours, phone and map. Thai
@@ -105,7 +106,8 @@ docs/                     this file, design notes (docs/design/), deployment gui
   appointment details (move, cancel, message the family),
   ตั้งค่า (settings): dentists (photos, treatments with kids/adults per
   treatment, weekly hours, leave), services (price, show/hide price, length),
-  opening hours and holidays, chairs, clinic info.
+  opening hours and holidays, chairs, how far ahead families may book, clinic
+  info.
 - **Full edition (built, not live yet):** cashier and receipts (PromptPay,
   deposits, insurance claims, doctor fees), patient file and dental chart,
   treatment plans and signatures, stock and labs, reports, LINE chat inbox,
@@ -115,7 +117,7 @@ docs/                     this file, design notes (docs/design/), deployment gui
 
 | Command | What it proves | Size |
 |---|---|---|
-| `pnpm e2e:test` | The whole booking flow end to end: book, see, staff assign, double-booking refused, kids/adults rules, 1-hour treatments, cancel | 38 checks |
+| `pnpm e2e:test` | The whole booking flow end to end: book, see, staff assign, double-booking refused, kids/adults rules, 1-hour treatments, cancel, booking window, batched availability | 48 checks |
 | `pnpm db:test` | Database behaviour: seed, slots, holidays, holds, queue, walk-ins | 28 checks |
 | `pnpm concurrency:test` | 30 simultaneous bookings and payments: no double booking, no overpayment, retries are safe | 15 checks |
 | `pnpm test` | Unit tests: billing maths, Thai baht text, PromptPay QR, slots, age rules | 16 tests |
@@ -151,7 +153,8 @@ the `.exe` from Releases on each PC.
 | 2. CI: tests and checks on every push, billing-math unit tests | ✅ Done | [design/02](design/02-ci.md) |
 | 3. Monitoring: error tracking + uptime alerts | ✅ Done | [design/03](design/03-monitoring.md). Owner setup: `ALERT_LINE_USER_ID` + UptimeRobot |
 | 4. Live updates instead of 20-second polling | ✅ Done | [design/04](design/04-live-updates.md). A save shows on other screens in ~0.1 s instead of 10 s; idle traffic 566 MB/h → 2.4 KB/h per screen |
-| 5. HTTP load test (k6) | ✅ Done (local) | [design/05](design/05-load-test.md). 200 families on one slot → 1 booking, 0 errors; one process handles ~30 families/s at p95 < 60 ms. Next: run it against a staging copy |
+| 5. HTTP load test (k6) | ✅ Done (local) | [design/05](design/05-load-test.md). 200 families on one slot → 1 booking, 0 errors. Next: run it against a staging copy |
+| 6. Fix what the measurements found: availability in one batch, slimmer staff download, booking window up to a year | ✅ Done | [design/06](design/06-faster-availability.md). One server: ~30 → ~60 families/s at p95 < 60 ms; staff download 3.2 MB → 0.5 MB |
 
 ## 9. Things to know before changing anything
 

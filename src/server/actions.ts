@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
 import type { IconKey } from "@/data/icons";
+import type { SlotLoad, SlotRow } from "@/server/queries";
 import { db } from "@/db/client";
 import { staffNotification } from "@/db/schema";
 import {
@@ -16,7 +17,6 @@ import {
   createAppointment,
   createDentist,
   deleteAppointment,
-  listAppointmentsBetween,
   markNotificationsRead,
   priceMap,
   removeHoliday,
@@ -162,8 +162,8 @@ export interface BookResult {
   ok: boolean;
   /** set when ok — the created appointment, for the confirmation slip */
   ref?: string;
-  /** set when !ok — the reason to show the parent */
-  error?: "slot_taken" | "invalid" | "line";
+  /** set when !ok — the reason to show the parent ("network" is set by the page itself) */
+  error?: "slot_taken" | "invalid" | "line" | "network";
 }
 
 /**
@@ -187,16 +187,21 @@ async function slotVerdict(
   /** a booking being moved — its own slots don't count against it */
   excludeId?: number,
 ): Promise<"ok" | "invalid" | "slot_taken"> {
-  const { todayISO, nowMinutes, minutesOf } = await import("@/lib/dates");
+  const { todayISO, nowMinutes, minutesOf, addDays } = await import("@/lib/dates");
   const today = todayISO();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < today) return "invalid";
+  // a real calendar day — "2026-02-30" would be stored as typed but read as 2 March
+  if (addDays(date, 0) !== date) return "invalid";
   if (!/^\d{2}:\d{2}$/.test(time)) return "invalid";
   // never bookable: a past date, or today with under an hour to spare —
   // the same lead the calendar enforces
   if (date === today && minutesOf(time) < nowMinutes() + 60) return "invalid";
 
-  const { getChairs, liveAtSlot, activeHoldsAtSlot, slotsForDate, capableDentistIds, treatmentDuration } =
+  const { getChairs, liveAtSlot, activeHoldsAtSlot, slotsForDate, capableDentistIds, treatmentDuration, getBookingWindowDays } =
     await import("@/server/queries");
+  // and never further ahead than the clinic's booking window — the calendar
+  // stops there too, but a request can be sent without the calendar
+  if (date > addDays(today, (await getBookingWindowDays()) - 1)) return "invalid";
   const { coveredTimes } = await import("@/lib/slots");
   // a longer treatment (e.g. whitening, 1 hour) needs every half-hour it runs into
   const need = coveredTimes(time, await treatmentDuration(treatmentKey));
@@ -233,6 +238,28 @@ async function slotVerdict(
     if (!slot || slot.taken) return "slot_taken";
   }
   return "ok";
+}
+
+/**
+ * The booking calendar's data for one month (`YYYY-MM-01`), only the days
+ * inside the booking window: per-dentist slots and chair load. The /book page
+ * ships the first weeks; months further ahead load when the family opens them.
+ */
+export async function bookingAvailability(month: string): Promise<{
+  slots: Record<string, SlotRow[]>;
+  load: Record<string, Record<string, SlotLoad>>;
+} | null> {
+  if (typeof month !== "string" || !/^\d{4}-\d{2}-01$/.test(month)) return null;
+  if (await limited("avail", 120, 600)) return null;
+  const { todayISO, addDays, daysInMonth } = await import("@/lib/dates");
+  const { getBookingWindowDays, slotsForDates, slotLoadForDates } = await import("@/server/queries");
+  const today = todayISO();
+  const lastDay = addDays(today, (await getBookingWindowDays()) - 1);
+  const dates = Array.from({ length: daysInMonth(month) }, (_, i) => addDays(month, i)).filter(
+    (d) => d >= today && d <= lastDay,
+  );
+  const [slots, load] = await Promise.all([slotsForDates(dates), slotLoadForDates(dates)]);
+  return { slots, load };
 }
 
 /**
@@ -310,32 +337,38 @@ export async function bookAppointment(input: {
   // minimal validation — never trust the client, even ours
   if (await limited("book", 20, 600)) return { ok: false, error: "invalid" };
   const name = typeof input.childName === "string" ? input.childName.trim().slice(0, 60) : "";
-  if (!input.date || !input.time || !input.treatmentKey || !input.phone || !name) {
+  const phone = typeof input.phone === "string" ? input.phone.trim().slice(0, 20) : "";
+  if (!input.date || !input.time || !input.treatmentKey || !phone || !name) {
     return { ok: false, error: "invalid" };
   }
-  if (!/^[0-9]{9,10}$/.test(input.phone.replace(/\D/g, ""))) {
+  if (!/^[0-9]{9,10}$/.test(phone.replace(/\D/g, ""))) {
     return { ok: false, error: "invalid" };
   }
+  // the page always asks kid or adult first — without it, a kids-only or
+  // adults-only treatment could be booked for the wrong person
+  if (!isAgeGroup(input.ageGroup)) return { ok: false, error: "invalid" };
   // only treatments the clinic shows on the website can be booked online
   const { isBookableTreatment } = await import("@/server/queries");
   if (!(await isBookableTreatment(input.treatmentKey))) return { ok: false, error: "invalid" };
 
-  // consume the caller's hold first — deleting it means our own reservation
-  // can't trip the checks below; if it lapsed and someone grabbed the slot
-  // meanwhile, the normal validation still fails honestly
   const dentistId = input.dentistId;
-  const ageGroup = isAgeGroup(input.ageGroup) ? input.ageGroup : null;
-  if (input.holdToken) {
-    const { releaseHold } = await import("@/server/queries");
-    await releaseHold(input.holdToken);
-  }
+  const ageGroup = input.ageGroup;
 
   // verify the LINE account up front — the booking is stamped with it (that is
   // how "my bookings" finds it, and the only way to cancel or move it later)
   // and it gets the push confirmation after. With LINE login configured a
-  // booking without a verified account is refused.
+  // booking without a verified account is refused — before the hold is let
+  // go, so a sign-in hiccup doesn't cost the family their time
   const identity = await patientIdentity(input.lineIdToken);
   if (!identity && process.env.LINE_LOGIN_CHANNEL_ID) return { ok: false, error: "line" };
+
+  // consume the caller's hold — deleting it means our own reservation can't
+  // trip the checks below; if it lapsed and someone grabbed the slot
+  // meanwhile, the normal validation still fails honestly
+  if (input.holdToken) {
+    const { releaseHold } = await import("@/server/queries");
+    await releaseHold(input.holdToken);
+  }
 
   const verdict = await slotVerdict(input.date, input.time, input.treatmentKey, dentistId, ageGroup);
   if (verdict !== "ok") {
@@ -357,8 +390,8 @@ export async function bookAppointment(input: {
     treatmentKey: input.treatmentKey,
     dentistId,
     childName: name,
-    guardianName: input.guardianName?.trim() || name,
-    phone: input.phone,
+    guardianName: (typeof input.guardianName === "string" ? input.guardianName.trim().slice(0, 60) : "") || name,
+    phone,
     forSelf: input.forSelf ?? false,
     ageGroup,
     source: "online",
@@ -401,9 +434,8 @@ export async function assignPoolDentist(
   dentistId: number,
 ): Promise<{ ok: boolean; error?: "taken" | "invalid" }> {
   await guard();
-  const { freeCapableAtSlot, updateAppointment } = await import("@/server/queries");
-  const all = await listAppointmentsBetween("1970-01-01", "9999-12-31");
-  const target = all.find((a) => a.id === id);
+  const { freeCapableAtSlot, updateAppointment, appointmentById } = await import("@/server/queries");
+  const target = await appointmentById(id);
   if (!target || target.status === "cancelled" || target.dentistId !== null) {
     return { ok: false, error: "invalid" };
   }
@@ -586,8 +618,12 @@ export async function rescheduleBooking(input: {
  */
 export async function staffLogin(pin: string): Promise<{ ok: boolean }> {
   if (await limited("stafflogin", 5, 600)) return { ok: false };
-  const { staffPinOk, staffGrantCookie } = await import("@/server/staffAuth");
-  if (!staffPinOk(pin)) return { ok: false };
+  const { staffPinOk, staffGrantCookie, staffLoginPaused, noteWrongPin } = await import("@/server/staffAuth");
+  if (await staffLoginPaused()) return { ok: false };
+  if (!staffPinOk(pin)) {
+    await noteWrongPin();
+    return { ok: false };
+  }
   await staffGrantCookie();
   return { ok: true };
 }
@@ -621,34 +657,22 @@ export async function staffCreateAppointment(input: {
 
 export async function staffUpdateAppointment(id: number, patch: AppointmentUpdate) {
   await guard();
-  const touchesSlot =
-    patch.status !== undefined ||
-    patch.date !== undefined ||
-    patch.time !== undefined ||
-    patch.dentistId !== undefined;
-  const before = touchesSlot
-    ? (await listAppointmentsBetween("1970-01-01", "9999-12-31")).find((a) => a.id === id)
-    : undefined;
-  // a move must not land on (or run into) another of that dentist's bookings —
-  // a one-hour booking needs both half-hours free
-  if (before && (patch.date !== undefined || patch.time !== undefined || patch.dentistId !== undefined)) {
-    const dentistId = patch.dentistId !== undefined ? patch.dentistId : before.dentistId;
-    const { overlapsDentist } = await import("@/server/queries");
-    if (
-      dentistId !== null &&
-      (patch.status ?? before.status) !== "cancelled" &&
-      (await overlapsDentist(dentistId, patch.date ?? before.date, patch.time ?? before.time, before.durationMin, id))
-    ) {
-      throw new Error("slot_taken");
-    }
+  const { appointmentById, staffMoveGuarded, settlePool } = await import("@/server/queries");
+  const moves = patch.date !== undefined || patch.time !== undefined || patch.dentistId !== undefined;
+  const touchesSlot = moves || patch.status !== undefined;
+  const before = touchesSlot ? await appointmentById(id) : null;
+  if (moves) {
+    // a move must not land on (or run into) another of that dentist's
+    // bookings — checked and written under the day lock (design/01)
+    const verdict = await staffMoveGuarded(id, patch);
+    if (verdict !== "ok") throw new Error(verdict);
+  } else {
+    await updateAppointment(id, patch);
   }
-  await updateAppointment(id, patch);
   // cancelling, moving or (un)assigning can home a pooled booking waiting
   // at the affected slot — run the pressure valve on both ends of a move
   if (touchesSlot) {
-    const { settlePool } = await import("@/server/queries");
-    const rows = await listAppointmentsBetween("1970-01-01", "9999-12-31");
-    const after = rows.find((a) => a.id === id);
+    const after = await appointmentById(id);
     if (before) await settlePool(before.date, before.time);
     if (after && (!before || after.date !== before.date || after.time !== before.time)) {
       await settlePool(after.date, after.time);
@@ -697,10 +721,33 @@ export async function staffUpdateChairs(chairs: number) {
   await revalidateAll();
 }
 
+/** how far ahead families may book on the website (at most a year) */
+export async function staffUpdateBookingWindow(days: number) {
+  await guard();
+  const { setBookingWindowDays } = await import("@/server/queries");
+  const saved = await setBookingWindowDays(days);
+  await revalidateAll();
+  return saved;
+}
+
+/**
+ * Appointments older than the staff download carries (it starts
+ * HISTORY_DAYS back) — loaded once, when a screen needs history: search,
+ * past appointments, a patient's visits, the schedule further back.
+ */
+export async function staffAppointmentsBefore(date: string) {
+  await guard();
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+  const { toUIAppointments } = await import("@/lib/staffConvert");
+  const { listAppointmentsBetween } = await import("@/server/queries");
+  const { addDays } = await import("@/lib/dates");
+  return toUIAppointments(await listAppointmentsBetween("1970-01-01", addDays(date, -1)));
+}
+
 export async function staffDeleteAppointment(id: number) {
   await guard();
-  const rows = await listAppointmentsBetween("1970-01-01", "9999-12-31");
-  const target = rows.find((a) => a.id === id);
+  const { appointmentById } = await import("@/server/queries");
+  const target = await appointmentById(id);
   await deleteAppointment(id);
   if (target) {
     const { settlePool } = await import("@/server/queries");
@@ -1380,7 +1427,19 @@ export async function staffUpdateTreatment(
 
 export async function staffUpdateDay(day: string, patch: { isOpen?: boolean; start?: string; end?: string }) {
   await guard();
-  await updateClinicDay(day, patch);
+  // only these three fields, real times, and the day must start before it ends
+  const clean: { isOpen?: boolean; start?: string; end?: string } = {};
+  if (typeof patch.isOpen === "boolean") clean.isOpen = patch.isOpen;
+  for (const f of ["start", "end"] as const) {
+    if (patch[f] === undefined) continue;
+    if (typeof patch[f] !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(patch[f])) throw new Error("invalid time");
+    clean[f] = patch[f];
+  }
+  const { listClinicDays } = await import("@/server/queries");
+  const now = (await listClinicDays()).find((d) => d.day === day);
+  if (!now) throw new Error("unknown day");
+  if ((clean.start ?? now.start) >= (clean.end ?? now.end)) throw new Error("opens after it closes");
+  await updateClinicDay(day, clean);
   await revalidateAll();
 }
 
@@ -1436,6 +1495,9 @@ export async function staffPrices() {
  * produced by the adapters in src/lib/staffConvert.ts, so the components keep
  * rendering exactly what they rendered against the old localStorage mock.
  */
+/** how many days back the staff download starts — older visits load on demand */
+const HISTORY_DAYS = 30;
+
 export async function staffBootstrap() {
   await guard();
   const {
@@ -1447,7 +1509,7 @@ export async function staffBootstrap() {
     toUINotifications,
   } = await import("@/lib/staffConvert");
   const {
-    listAppointmentsBetween,
+    listAppointmentsForStaff,
     listDentists,
     listPatients,
     listWaitlist,
@@ -1460,17 +1522,22 @@ export async function staffBootstrap() {
     listTreatmentCatalog,
     listDentistLeaves,
     getClinicInfo,
+    getBookingWindowDays,
   } = await import("@/server/queries");
 
-  const today = (await import("@/lib/dates")).todayISO();
+  const { todayISO, addDays } = await import("@/lib/dates");
+  const today = todayISO();
+  // recent past + everything ahead; older history loads on demand
+  // (staffAppointmentsBefore) instead of riding along on every refresh
+  const appointmentsFrom = addDays(today, -HISTORY_DAYS);
   // read before the data: a change landing in between makes the screen fetch
   // again (harmless), never miss it
   const changeSeq = await (await import("@/server/changes")).currentChangeSeq();
 
   const lineUnread = await (await import("@/server/chat")).unreadCount().catch(() => 0);
-  const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves, clinicInfo] =
+  const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves, clinicInfo, bookingWindowDays] =
     await Promise.all([
-      listAppointmentsBetween("1970-01-01", "9999-12-31"),
+      listAppointmentsForStaff(appointmentsFrom, new Date(Date.now() - 24 * 3600_000)),
       listDentists(),
       listPatients(),
       listWaitlist(),
@@ -1483,11 +1550,14 @@ export async function staffBootstrap() {
       listTreatmentCatalog(),
       listDentistLeaves(),
       getClinicInfo(),
+      getBookingWindowDays(),
     ]);
 
   return {
     today,
     appointments: toUIAppointments(appts),
+    /** the first date `appointments` covers — older ones come from staffAppointmentsBefore */
+    appointmentsFrom,
     dentists: toUIEditableDentists(dentists),
     patients: toUIPatients(patients),
     waitlist: toUIWaitlist(waitlist),
@@ -1498,7 +1568,7 @@ export async function staffBootstrap() {
     servicePrices: prices,
     treatments,
     dentistLeaves,
-    settings: { chairs },
+    settings: { chairs, bookingWindowDays },
     /** the clinic's saved contact details — the settings form starts from these */
     clinicInfo,
     /** the change number this data is current to (live updates, design/04) */

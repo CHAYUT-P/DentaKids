@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useStaff, type PatientChild, type PatientRecord } from "@/lib/staffStore";
 import { normalizeName } from "@/lib/clinicSettings";
 import { useT } from "@/i18n/lang";
@@ -29,7 +29,11 @@ import {
 } from "@/components/staff/shell/staffIcons";
 
 function StaffPatientsPageInner() {
-  const { today, patients, createPatient, updatePatient, appointments, showToast } = useStaff();
+  const { today, patients, createPatient, updatePatient, appointments, showToast, loadHistory } = useStaff();
+  // each patient's visit list needs the full history
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
   const dict = useT();
   const [search, setSearch] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);

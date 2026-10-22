@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { ClockButton, useStaffUser } from "@/lib/staffUser";
 import { initial } from "@/lib/roles";
@@ -27,7 +27,7 @@ const STATUS_TH: Record<StaffAppointment["status"], string> = {
  */
 export function StaffTopbar() {
   const { user, accounts, signOut } = useStaffUser();
-  const { today, appointments, notifications, toast } = useStaff();
+  const { today, appointments, notifications, toast, loadHistory } = useStaff();
   const tr = useTreatments();
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
@@ -36,6 +36,11 @@ export function StaffTopbar() {
   const [opened, setOpened] = useState<StaffAppointment | null>(null);
 
   const unread = notifications.filter((n) => n.unread).length;
+
+  // searching covers old visits too — fetch them the first time someone searches
+  useEffect(() => {
+    if (query.trim().length >= 2) loadHistory();
+  }, [query, loadHistory]);
 
   /* name, phone (digits only) or booking ref — nearest to today first */
   const results = useMemo(() => {
@@ -60,7 +65,9 @@ export function StaffTopbar() {
     (toast.includes("อยู่แล้ว") ||
       toast.includes("ข้อผิดพลาด") ||
       toast.includes("ล้มเหลว") ||
-      toast.includes("ไม่สำเร็จ"));
+      toast.includes("ไม่สำเร็จ") ||
+      toast.includes("ไม่ถูกต้อง") ||
+      toast.includes("ไม่ว่าง"));
 
   return (
     <>

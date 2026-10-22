@@ -11,6 +11,7 @@ import {
 } from "@/components/staff/shell/staffIcons";
 import { RangeCalendar, dayCount, fmtHolidayRange, fmtTHDate } from "@/components/staff/schedule/RangeCalendar";
 import { SystemStatus } from "@/components/staff/settings/SystemStatus";
+import { WINDOW_CHOICES, windowLabelTh } from "@/lib/bookingWindow";
 
 const DAY_LABELS: Record<DayKey, { th: string; en: string }> = {
   mon: { th: "วันจันทร์", en: "Monday" },
@@ -38,6 +39,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
     holidays,
     settings,
     updateChairs,
+    updateBookingWindow,
     clinicInfo,
     updateClinicInfo,
     updateDayOpen,
@@ -49,6 +51,27 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   // which group shows is chosen by the ตั้งค่า sub-menu (SetupView)
   const activeTab = tab;
 
+  // opening hours: typed into a draft, saved when the box is left — not on
+  // every keystroke (a half-typed time would be sent, and saves could land
+  // out of order) — and only when the day still starts before it ends
+  const [timeDraft, setTimeDraft] = useState<Record<string, string>>({});
+  const commitTime = (day: DayKey, field: "start" | "end", start: string, end: string) => {
+    const key = `${day}:${field}`;
+    const val = timeDraft[key];
+    if (val === undefined) return;
+    setTimeDraft((d) => {
+      const rest = { ...d };
+      delete rest[key];
+      return rest;
+    });
+    const next = field === "start" ? { start: val, end } : { start, end: val };
+    if (!/^\d{2}:\d{2}$/.test(val) || next.start >= next.end) {
+      showToast("เวลาเปิด–ปิดไม่ถูกต้อง: เวลาเปิดต้องก่อนเวลาปิด — ยังไม่ได้บันทึก");
+      return;
+    }
+    if (val !== (field === "start" ? start : end)) updateDayTime(day, field, val);
+  };
+
   // Special-holiday range selection (the saved list lives in the staff store
   // so patient booking also sees it). Click once = single day, twice = range.
   const [selStart, setSelStart] = useState<string | null>(null);
@@ -56,8 +79,10 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   const [selHover, setSelHover] = useState<string | null>(null);
   const [newHolidayName, setNewHolidayName] = useState("");
 
-  // chairs: the one booking rule staff set here (the others are fixed, see below)
+  // the booking rules staff set here: chairs, and how far ahead families may
+  // book on the website (the others are fixed, see below)
   const [chairCount, setChairCount] = useState<number>(settings.chairs);
+  const [windowDays, setWindowDays] = useState<number>(settings.bookingWindowDays);
 
   // the clinic's contact details, starting from what is saved — so saving
   // never puts demo values back
@@ -107,7 +132,8 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
     e.preventDefault();
     if (activeTab === "booking") {
       if (chairCount !== settings.chairs) updateChairs(chairCount);
-      showToast("บันทึกจำนวนเก้าอี้แล้ว");
+      if (windowDays !== settings.bookingWindowDays) updateBookingWindow(windowDays);
+      showToast("บันทึกกฎการจองแล้ว");
       return;
     }
     if (activeTab === "profile") {
@@ -232,16 +258,18 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                           type="time"
                           className="form-control"
                           style={{ padding: "4px 8px", width: "110px", fontSize: "13px" }}
-                          value={item.start}
-                          onChange={(e) => updateDayTime(item.day, "start", e.target.value)}
+                          value={timeDraft[`${item.day}:start`] ?? item.start}
+                          onChange={(e) => setTimeDraft((d) => ({ ...d, [`${item.day}:start`]: e.target.value }))}
+                          onBlur={() => commitTime(item.day, "start", item.start, item.end)}
                         />
                         <span style={{ fontSize: "12px", color: "var(--staff-ink-muted)" }}>ถึง</span>
                         <input
                           type="time"
                           className="form-control"
                           style={{ padding: "4px 8px", width: "110px", fontSize: "13px" }}
-                          value={item.end}
-                          onChange={(e) => updateDayTime(item.day, "end", e.target.value)}
+                          value={timeDraft[`${item.day}:end`] ?? item.end}
+                          onChange={(e) => setTimeDraft((d) => ({ ...d, [`${item.day}:end`]: e.target.value }))}
+                          onBlur={() => commitTime(item.day, "end", item.start, item.end)}
                         />
                         <span style={{ fontSize: "12px", color: "var(--staff-ink-muted)" }}>น.</span>
                       </div>
@@ -398,7 +426,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                 gap: "16px",
                 boxShadow: "var(--staff-shadow-sm)",
               }}>
-              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>เก้าอี้ทำฟัน</strong>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>เก้าอี้ทำฟัน &amp; ระยะจองล่วงหน้า</strong>
               <div className="form-group">
                 <label>จำนวนเก้าอี้ที่ใช้งานได้</label>
                 <select className="form-control" value={chairCount} onChange={(e) => setChairCount(Number(e.target.value))}>
@@ -410,6 +438,23 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                 </select>
                 <span className="settings-hint">
                   เมื่อคนไข้เลือก “ทันตแพทย์ท่านใดก็ได้” ระบบรับจองในเวลาเดียวกันได้ไม่เกินจำนวนเก้าอี้
+                </span>
+              </div>
+              <div className="form-group">
+                <label>ผู้ปกครองจองล่วงหน้าได้ไม่เกิน</label>
+                <select className="form-control" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
+                  {/* a value saved some other way still shows as itself */}
+                  {(WINDOW_CHOICES.some((c) => c.days === windowDays)
+                    ? WINDOW_CHOICES
+                    : [...WINDOW_CHOICES, { days: windowDays, th: windowLabelTh(windowDays) }]
+                  ).map((c) => (
+                    <option key={c.days} value={c.days}>
+                      {c.th}
+                    </option>
+                  ))}
+                </select>
+                <span className="settings-hint">
+                  ปฏิทินในหน้าจองออนไลน์เปิดให้เลือกวันได้ถึงเท่านี้ (สูงสุด 1 ปี) — เจ้าหน้าที่ลงนัดในแอปนี้ได้ทุกวันเหมือนเดิม
                 </span>
               </div>
             </div>
@@ -433,7 +478,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                   <strong>1 คิว = 30 นาที</strong> — บริการที่ใช้เวลานานกว่า (เช่น ฟอกสีฟัน 1 ชม.) กันหลายช่องอัตโนมัติ ตั้งใน “บริการ &amp; ราคา”
                 </li>
                 <li>
-                  <strong>จองล่วงหน้าได้ 14 วัน</strong> และต้องจองก่อนเวลานัดอย่างน้อย <strong>1 ชั่วโมง</strong>
+                  <strong>จองล่วงหน้าได้ {windowLabelTh(settings.bookingWindowDays)}</strong> และต้องจองก่อนเวลานัดอย่างน้อย <strong>1 ชั่วโมง</strong>
                 </li>
                 <li>
                   ผู้ปกครอง<strong>เลื่อน/ยกเลิกนัดเองได้</strong>ทาง LINE จนกว่าจะเช็คอิน

@@ -11,6 +11,7 @@ async function main() {
   const { slotsForDate, activeHoldsAtSlot } = await import("../src/server/queries");
 
   const base = {
+    ageGroup: "kid" as const,
     date: "2026-09-14", // Monday — piya (the only braces dentist) is off
     time: "09:00",
     childName: "guard-check",

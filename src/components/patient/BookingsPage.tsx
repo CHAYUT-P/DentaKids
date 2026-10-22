@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { TreatmentKey } from "@/lib/treatments";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useLang } from "@/i18n/lang";
-import { fmtShort } from "@/lib/dates";
+import { fmtShort, minutesOf } from "@/lib/dates";
 import { timeRange } from "@/lib/slots";
 import { useLine } from "@/lib/useLine";
 import { cancelBooking, myBookingsByLine } from "@/server/actions";
@@ -69,10 +69,13 @@ function PastRow({ a, names }: { a: Row; names: Names }) {
 
 export function BookingsPage({
   today,
+  nowMin,
   dentistNames,
   address,
 }: {
   today: string;
+  /** the clinic's clock (Bangkok), minutes since midnight */
+  nowMin: number;
   dentistNames: Names;
   address: { th: string; en: string };
 }) {
@@ -186,8 +189,9 @@ export function BookingsPage({
               dentistName={a.dentistSlug ? dentistNames[a.dentistSlug]?.[lang] : undefined}
               address={address[lang]}
             />
-            {/* only a booking nobody has checked in yet can move or be cancelled */}
-            {a.status !== "confirmed" ? null : asking === a.ref ? (
+            {/* only a booking nobody has checked in yet, and whose time hasn't
+                come, can move or be cancelled (the server holds the same rule) */}
+            {a.status !== "confirmed" || (a.date === today && minutesOf(a.time) < nowMin) ? null : asking === a.ref ? (
               <div className="cancelAsk">
                 <span className="caQ">{t.bookingsPage.confirmCancel}</span>
                 <div className="twoBtn" style={{ marginTop: 0 }}>

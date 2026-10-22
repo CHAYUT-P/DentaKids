@@ -6,13 +6,14 @@ import type { TreatmentKey } from "@/lib/treatments";
  * only ever runs on the server in the app because only server code imports it.
  */
 
-import { and, asc, desc, eq, getTableColumns, type AnyColumn, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, type AnyColumn, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
 
 import type { IconKey } from "@/data/icons";
 import { isIconKey } from "@/data/icons";
 import { addDays, minutesOf, todayISO, weekday, weekdayIndex } from "@/lib/dates";
 import { agesAllow, isAgeGroup, isTreatAges, type AgeGroup, type TreatAges } from "@/lib/ageGroup";
 import { coveredTimes, SLOT_MIN } from "@/lib/slots";
+import { clampWindowDays, DEFAULT_WINDOW_DAYS } from "@/lib/bookingWindow";
 import { newTreatmentKey, toTreatmentInfo, type TreatmentInfo, type TreatmentKey } from "@/lib/treatments";
 import type { PatientChildInput, PatientUpsertInput, VisitItem } from "@/lib/staffTypes";
 /**
@@ -507,81 +508,82 @@ export async function treatmentDuration(key: string): Promise<number> {
  * by the slots it is about to give up.
  */
 export async function slotsForDate(date: string, excludeId?: number): Promise<SlotRow[]> {
-  const weekdayKey = weekday(date);
-  const weekdayNum = weekdayIndex(date);
+  return (await slotsForDates([date], excludeId))[date] ?? [];
+}
 
-  const [days, daysOff] = await Promise.all([
-    db.select().from(clinicDay).where(eq(clinicDay.day, weekdayKey)),
+/**
+ * slotsForDate for many dates at once — the booking calendar asks for weeks or
+ * months. The same seven queries whatever the number of days (one per day used
+ * to cost ~100 queries per page view; design/05), then the per-day rules run
+ * here in memory: open day, holiday, leave, shift, booked, held.
+ */
+export async function slotsForDates(dates: string[], excludeId?: number): Promise<Record<string, SlotRow[]>> {
+  const out: Record<string, SlotRow[]> = {};
+  if (dates.length === 0) return out;
+  const sorted = [...dates].sort();
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+
+  const [days, daysOff, roster, leaves, shifts, booked, held] = await Promise.all([
+    db.select().from(clinicDay),
     db
-      .select()
+      .select({ start: holiday.start, end: holiday.end })
       .from(holiday)
-      .where(and(lte(holiday.start, date), gte(holiday.end, date))),
+      .where(and(lte(holiday.start, last), gte(holiday.end, first))),
+    db.select({ id: dentist.id, slug: dentist.slug }).from(dentist).where(eq(dentist.isActive, true)),
+    db
+      .select({ id: dentistLeave.dentistId, start: dentistLeave.start, end: dentistLeave.end })
+      .from(dentistLeave)
+      .where(and(lte(dentistLeave.start, last), gte(dentistLeave.end, first))),
+    db.select().from(dentistShift).where(eq(dentistShift.enabled, true)),
+    db
+      .select({
+        id: appointment.id,
+        date: appointment.date,
+        dentistId: appointment.dentistId,
+        time: appointment.time,
+        durationMin: appointment.durationMin,
+      })
+      .from(appointment)
+      .where(and(gte(appointment.date, first), lte(appointment.date, last), ne(appointment.status, "cancelled"))),
+    // an active slot hold blocks that named dentist's slots exactly like a booking
+    db
+      .select({ date: slotHold.date, dentistId: slotHold.dentistId, time: slotHold.time, durationMin: slotHold.durationMin })
+      .from(slotHold)
+      .where(and(gte(slotHold.date, first), lte(slotHold.date, last), gt(slotHold.expiresAt, new Date()))),
   ]);
 
-  const open = days[0]?.isOpen && daysOff.length === 0;
-  if (!open) return [];
-
-  const roster = await db
-    .select({ id: dentist.id, slug: dentist.slug })
-    .from(dentist)
-    .where(eq(dentist.isActive, true));
-
-  // a dentist on leave (ลา) that day has no slots at all
-  const away = new Set(
-    (
-      await db
-        .select({ id: dentistLeave.dentistId })
-        .from(dentistLeave)
-        .where(and(lte(dentistLeave.start, date), gte(dentistLeave.end, date)))
-    ).map((l) => l.id),
-  );
-  const active = roster.filter((d) => !away.has(d.id));
-
-  if (active.length === 0) return [];
-
-  const activeIds = active.map((a) => a.id);
-  const shifts = await db
-    .select()
-    .from(dentistShift)
-    .where(and(eq(dentistShift.enabled, true), inArray(dentistShift.dentistId, activeIds)));
-
-  const booked = await db
-    .select({ id: appointment.id, dentistId: appointment.dentistId, time: appointment.time, durationMin: appointment.durationMin })
-    .from(appointment)
-    .where(and(eq(appointment.date, date), ne(appointment.status, "cancelled")));
-
+  const openDay = new Map(days.map((d) => [d.day, d]));
   // a booking takes every half-hour it runs into, not just its start
-  const takenSet = new Set<string>();
+  const taken = new Set<string>();
   for (const b of booked) {
     if (b.id === excludeId) continue;
-    for (const t of coveredTimes(b.time, b.durationMin)) takenSet.add(`${b.dentistId}:${t}`);
+    for (const t of coveredTimes(b.time, b.durationMin)) taken.add(`${b.date}:${b.dentistId}:${t}`);
   }
-
-  // an active slot hold blocks that named dentist's slots exactly like a booking
-  const held = await db
-    .select({ dentistId: slotHold.dentistId, time: slotHold.time, durationMin: slotHold.durationMin })
-    .from(slotHold)
-    .where(and(eq(slotHold.date, date), gt(slotHold.expiresAt, new Date())));
   for (const h of held) {
     if (h.dentistId === null) continue;
-    for (const t of coveredTimes(h.time, h.durationMin)) takenSet.add(`${h.dentistId}:${t}`);
+    for (const t of coveredTimes(h.time, h.durationMin)) taken.add(`${h.date}:${h.dentistId}:${t}`);
   }
 
-  const out: SlotRow[] = [];
-  for (const d of active) {
-    // only this weekday's shift — never the other six rows
-    const shift = shifts.find((s) => s.dentistId === d.id && s.weekday === weekdayNum);
-    if (!shift) continue;
-    const startM = minutesOf(shift.start);
-    const endM = minutesOf(shift.end);
-    for (let m = startM; m + 30 <= endM; m += 30) {
-      const hhmm = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-      out.push({
-        dentistId: d.id,
-        dentistSlug: d.slug,
-        time: hhmm,
-        taken: takenSet.has(`${d.id}:${hhmm}`),
-      });
+  for (const date of dates) {
+    const rows: SlotRow[] = [];
+    out[date] = rows;
+    const clinic = openDay.get(weekday(date));
+    if (!clinic?.isOpen) continue;
+    if (daysOff.some((h) => h.start <= date && h.end >= date)) continue;
+    const weekdayNum = weekdayIndex(date);
+    for (const d of roster) {
+      // a dentist on leave (ลา) that day has no slots at all
+      if (leaves.some((l) => l.id === d.id && l.start <= date && l.end >= date)) continue;
+      // only this weekday's shift — never the other six rows
+      const shift = shifts.find((s) => s.dentistId === d.id && s.weekday === weekdayNum);
+      if (!shift) continue;
+      // inside the dentist's shift AND the clinic's opening hours that day
+      const endM = Math.min(minutesOf(shift.end), minutesOf(clinic.end));
+      for (let m = Math.max(minutesOf(shift.start), minutesOf(clinic.start)); m + 30 <= endM; m += 30) {
+        const hhmm = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+        rows.push({ dentistId: d.id, dentistSlug: d.slug, time: hhmm, taken: taken.has(`${date}:${d.id}:${hhmm}`) });
+      }
     }
   }
   return out;
@@ -616,6 +618,21 @@ export async function getChairs(q: Pick<typeof db, "select"> = db): Promise<numb
   const rows = await q.select().from(clinicSetting).where(eq(clinicSetting.key, "chairs"));
   const n = Number(rows[0]?.value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
+}
+
+/** how many days ahead families may book on the website (src/lib/bookingWindow.ts) */
+export async function getBookingWindowDays(q: Pick<typeof db, "select"> = db): Promise<number> {
+  const rows = await q.select().from(clinicSetting).where(eq(clinicSetting.key, "booking_window_days"));
+  return rows[0] ? clampWindowDays(rows[0].value) : DEFAULT_WINDOW_DAYS;
+}
+
+export async function setBookingWindowDays(n: number): Promise<number> {
+  const days = clampWindowDays(n);
+  await db
+    .insert(clinicSetting)
+    .values({ key: "booking_window_days", value: String(days) })
+    .onConflictDoUpdate({ target: clinicSetting.key, set: { value: String(days), updatedAt: new Date() } });
+  return days;
 }
 
 export async function setChairs(n: number): Promise<void> {
@@ -674,6 +691,10 @@ export interface SlotLoad {
 export async function slotLoadForDates(dates: string[]): Promise<Record<string, Record<string, SlotLoad>>> {
   const out: Record<string, Record<string, SlotLoad>> = {};
   if (dates.length === 0) return out;
+  const sorted = [...dates].sort();
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const asked = new Set(dates);
   const rows = await db
     .select({
       date: appointment.date,
@@ -682,16 +703,17 @@ export async function slotLoadForDates(dates: string[]): Promise<Record<string, 
       dentistId: appointment.dentistId,
     })
     .from(appointment)
-    .where(and(inArray(appointment.date, dates), ne(appointment.status, "cancelled")));
+    .where(and(gte(appointment.date, first), lte(appointment.date, last), ne(appointment.status, "cancelled")));
 
   // active holds occupy chairs too, so a held time can't look free on the calendar
   const holds = await db
     .select({ date: slotHold.date, time: slotHold.time, durationMin: slotHold.durationMin, dentistId: slotHold.dentistId })
     .from(slotHold)
-    .where(and(inArray(slotHold.date, dates), gt(slotHold.expiresAt, new Date())));
+    .where(and(gte(slotHold.date, first), lte(slotHold.date, last), gt(slotHold.expiresAt, new Date())));
 
   // a long booking sits in a chair for every half-hour it runs
   for (const r of [...rows, ...holds]) {
+    if (!asked.has(r.date)) continue;
     const day = (out[r.date] ??= {});
     for (const t of coveredTimes(r.time, r.durationMin)) {
       const cell = (day[t] ??= { live: 0, pool: 0 });
@@ -835,6 +857,12 @@ export async function releaseHold(token: string): Promise<void> {
  * is under `limit` calls inside `windowSec`. One upsert — a lapsed window
  * resets the counter, a live one increments it.
  */
+/** has this counter gone over `limit` in its current window? (read only) */
+export async function rateExceeded(key: string, limit: number): Promise<boolean> {
+  const [row] = await db.select().from(rateLimit).where(eq(rateLimit.key, key));
+  return !!row && row.resetAt > new Date() && row.count > limit;
+}
+
 export async function checkRate(key: string, limit: number, windowSec: number): Promise<boolean> {
   const resetAt = new Date(Date.now() + windowSec * 1000);
   const rows = await db
@@ -903,11 +931,17 @@ export async function settlePool(date: string, time: string): Promise<string[]> 
     const free = await freeCapableAtSlot(date, oldest.time, oldest.treatmentKey, oldest.ageGroup, oldest.durationMin, oldest.id);
     if (free.length === 0) break;
     const target = free[0];
-    const updated = await db
-      .update(appointment)
-      .set({ dentistId: target.id, updatedAt: new Date() })
-      .where(and(eq(appointment.id, oldest.id), ne(appointment.status, "cancelled")))
-      .returning({ ref: appointment.ref });
+    // the same day lock bookings take, and the dentist re-checked under it: a
+    // named booking landing this instant can't end up overlapping this one
+    const updated = await db.transaction(async (tx) => {
+      await lockDay(tx, date);
+      if (await overlapsDentist(target.id, date, oldest.time, oldest.durationMin, oldest.id, tx)) return [];
+      return tx
+        .update(appointment)
+        .set({ dentistId: target.id, updatedAt: new Date() })
+        .where(and(eq(appointment.id, oldest.id), ne(appointment.status, "cancelled")))
+        .returning({ ref: appointment.ref });
+    });
     if (updated.length === 0) break; // taken/cancelled mid-flight — stop, staff sees it
     assigned.push(updated[0].ref);
     const d = await dentistName(target.id);
@@ -982,10 +1016,15 @@ async function nextRef(): Promise<string> {
  * lock is ours, the slot (or a chair) has gone.
  */
 export async function moveAppointmentGuarded(id: number, date: string, time: string): Promise<boolean> {
-  const [row] = await db.select().from(appointment).where(eq(appointment.id, id));
-  if (!row) return false;
+  const [peek] = await db.select({ date: appointment.date }).from(appointment).where(eq(appointment.id, id));
+  if (!peek) return false;
   return db.transaction(async (tx) => {
-    await lockDay(tx, date);
+    // both days, always in the same order: two moves of one booking (or a
+    // move and a cancel) take turns instead of both succeeding
+    await lockDays(tx, [peek.date, date]);
+    // read it under the lock — a cancel or another move may just have landed
+    const [row] = await tx.select().from(appointment).where(eq(appointment.id, id));
+    if (!row || row.status !== "confirmed" || row.date !== peek.date) return false;
     if (row.dentistId !== null) {
       if (await overlapsDentist(row.dentistId, date, time, row.durationMin, id, tx)) return false;
     } else if (await chairsFull(tx, date, coveredTimes(time, row.durationMin), id)) {
@@ -1049,6 +1088,51 @@ async function chairsFull(
  */
 async function lockDay(tx: { execute: typeof db.execute }, date: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`appt-day:${date}`}))`);
+}
+
+/** several days' locks, sorted so two transactions can never wait on each other */
+async function lockDays(tx: { execute: typeof db.execute }, dates: string[]): Promise<void> {
+  for (const d of [...new Set(dates)].sort()) await lockDay(tx, d);
+}
+
+export async function appointmentById(id: number): Promise<AppointmentDTO | null> {
+  const [row] = await db.select().from(appointment).where(eq(appointment.id, id));
+  if (!row) return null;
+  const d = row.dentistId === null ? { slug: "", name: "" } : await dentistName(row.dentistId);
+  return toAppointmentDTO(row, d.slug, d.name);
+}
+
+/**
+ * A staff edit that moves a booking (date, time or dentist), under the same
+ * day locks as bookings: re-read under the lock, the dentist must be free for
+ * the whole treatment, and a cancelled or finished booking isn't moved by
+ * accident (restoring one means setting its status in the same edit).
+ */
+export async function staffMoveGuarded(
+  id: number,
+  patch: AppointmentUpdate,
+): Promise<"ok" | "slot_taken" | "not_movable" | "missing"> {
+  const [peek] = await db.select({ date: appointment.date }).from(appointment).where(eq(appointment.id, id));
+  if (!peek) return "missing";
+  return db.transaction(async (tx) => {
+    await lockDays(tx, [peek.date, patch.date ?? peek.date]);
+    const [row] = await tx.select().from(appointment).where(eq(appointment.id, id));
+    if (!row) return "missing";
+    if ((row.status === "cancelled" || row.status === "completed") && patch.status === undefined) return "not_movable";
+    const date = patch.date ?? row.date;
+    const time = patch.time ?? row.time;
+    const dentistId = patch.dentistId !== undefined ? patch.dentistId : row.dentistId;
+    const live = (patch.status ?? row.status) !== "cancelled";
+    if (live && dentistId !== null && (await overlapsDentist(dentistId, date, time, row.durationMin, id, tx))) {
+      return "slot_taken";
+    }
+    try {
+      await tx.update(appointment).set({ ...patch, updatedAt: new Date() }).where(eq(appointment.id, id));
+    } catch {
+      return "slot_taken"; // the unique slot index fired
+    }
+    return "ok";
+  });
 }
 
 export async function createAppointment(
@@ -1207,12 +1291,17 @@ async function dentistName(dentistId: number): Promise<{ slug: string; name: str
 }
 
 export async function listAppointmentsBetween(start: string, end: string): Promise<AppointmentDTO[]> {
+  return listAppointmentsWhere(and(gte(appointment.date, start), lte(appointment.date, end)));
+}
+
+/** appointments matching one condition, with their dentist, by date and time */
+async function listAppointmentsWhere(where: SQL | undefined): Promise<AppointmentDTO[]> {
   const rows = await db
     .select({ a: appointment, slug: dentist.slug, dname: dentistText.name })
     .from(appointment)
     .leftJoin(dentist, eq(dentist.id, appointment.dentistId))
     .leftJoin(dentistText, and(eq(dentistText.dentistId, dentist.id), eq(dentistText.lang, "th")))
-    .where(and(gte(appointment.date, start), lte(appointment.date, end)))
+    .where(where)
     .orderBy(asc(appointment.date), asc(appointment.time));
 
   return rows.map((r) =>
@@ -1224,12 +1313,19 @@ export async function listAppointmentsBetween(start: string, end: string): Promi
   );
 }
 
+/**
+ * The staff download: every appointment from `from` on, plus older ones
+ * changed since `changedSince` (an old visit marked done on another PC must
+ * still reach screens that loaded history).
+ */
+export async function listAppointmentsForStaff(from: string, changedSince: Date): Promise<AppointmentDTO[]> {
+  return listAppointmentsWhere(or(gte(appointment.date, from), gte(appointment.updatedAt, changedSince)));
+}
+
 export async function listAppointmentsByPhone(phone: string): Promise<AppointmentDTO[]> {
   const digits = phone.replace(/\D/g, "");
   if (!digits) return [];
-  return listAppointmentsBetween("1970-01-01", "9999-12-31").then((all) =>
-    all.filter((a) => a.phone.replace(/\D/g, "") === digits),
-  );
+  return listAppointmentsWhere(sql`regexp_replace(${appointment.phone}, '\D', '', 'g') = ${digits}`);
 }
 
 export interface AppointmentUpdate {
@@ -1325,20 +1421,10 @@ export async function findGuardianByLineId(lineUserId: string) {
  */
 export async function listAppointmentsForLine(lineUserId: string): Promise<AppointmentDTO[]> {
   const g = await findGuardianByLineId(lineUserId);
-  const all = await listAppointmentsBetween("1970-01-01", "9999-12-31");
-  const mine = new Set(
-    (
-      await db
-        .select({ id: appointment.id })
-        .from(appointment)
-        .where(
-          g
-            ? or(eq(appointment.lineUserId, lineUserId), eq(appointment.guardianId, g.id))
-            : eq(appointment.lineUserId, lineUserId),
-        )
-    ).map((r) => r.id),
+  // only this account's rows (indexed by line_user_id), never the whole table
+  return listAppointmentsWhere(
+    g ? or(eq(appointment.lineUserId, lineUserId), eq(appointment.guardianId, g.id)) : eq(appointment.lineUserId, lineUserId),
   );
-  return all.filter((a) => mine.has(a.id)).sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1));
 }
 
 /** where a booking's LINE messages go: its own account, else its linked guardian's */

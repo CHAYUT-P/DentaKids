@@ -12,16 +12,24 @@ import { errorEvent } from "@/db/schema";
  * the patient website or the staff app (/api/client-error) — is grouped by a
  * fingerprint and counted in `error_event`.
  *
- * A NEW kind of error (or one not alerted in the last hour) sends a LINE
- * message to ALERT_LINE_USER_ID, so the developer hears about it before the
- * clinic calls. At most MAX_ALERTS_PER_HOUR messages go out, so a storm of
- * errors can't flood anyone's phone or the LINE quota.
+ * A NEW kind of server error (or one not alerted in the last hour) sends a
+ * LINE message to ALERT_LINE_USER_ID, so the developer hears about it before
+ * the clinic calls. At most MAX_ALERTS_PER_HOUR / MAX_ALERTS_PER_DAY go out:
+ * alerts use the clinic OA's monthly message quota, which booking
+ * confirmations and reminders need.
+ *
+ * Browser-reported errors are recorded and shown in the staff app, but never
+ * alert on their own: anyone can post to /api/client-error, so letting them
+ * alert would let a stranger spend the clinic's LINE quota and write the text
+ * of messages to the developer's phone.
  *
  * Reporting must never make things worse: it never throws.
  */
 
 const ALERT_EVERY_MS = 60 * 60 * 1000;
 const MAX_ALERTS_PER_HOUR = 10;
+const MAX_ALERTS_PER_DAY = 20;
+const ALERTING: ErrorSource[] = ["server", "staff-api"];
 
 export type ErrorSource = "server" | "staff-api" | "patient-web" | "staff-app";
 
@@ -53,12 +61,15 @@ export async function reportError(source: ErrorSource, err: unknown, where = "")
 
     const to = process.env.ALERT_LINE_USER_ID;
     const due = !row.alertedAt || Date.now() - row.alertedAt.getTime() > ALERT_EVERY_MS;
-    if (!to || !due) return;
-    const [{ n }] = await db
-      .select({ n: sql<number>`count(*)::int` })
+    if (!to || !due || !ALERTING.includes(source)) return;
+    const [{ hour, day }] = await db
+      .select({
+        hour: sql<number>`count(*) filter (where ${errorEvent.alertedAt} > now() - interval '1 hour')::int`,
+        day: sql<number>`count(*)::int`,
+      })
       .from(errorEvent)
-      .where(gt(errorEvent.alertedAt, new Date(Date.now() - ALERT_EVERY_MS)));
-    if (n >= MAX_ALERTS_PER_HOUR) return;
+      .where(gt(errorEvent.alertedAt, new Date(Date.now() - 24 * ALERT_EVERY_MS)));
+    if (hour >= MAX_ALERTS_PER_HOUR || day >= MAX_ALERTS_PER_DAY) return;
 
     const { pushLineAlert } = await import("@/server/line");
     const sent = await pushLineAlert(

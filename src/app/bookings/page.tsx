@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 
 import { BookingsPage } from "@/components/patient/BookingsPage";
-import { todayISO } from "@/lib/dates";
+import { nowMinutes, todayISO } from "@/lib/dates";
 import { TreatmentsProvider } from "@/lib/treatmentsContext";
 import { getClinicInfo, listDentists, listTreatmentCatalog } from "@/server/queries";
 
@@ -29,6 +29,7 @@ export default async function Page() {
     <TreatmentsProvider list={catalog}>
       <BookingsPage
         today={todayISO()}
+        nowMin={nowMinutes()}
         dentistNames={dentistNames}
         address={{ th: info?.addressTh ?? "", en: info?.addressEn || info?.addressTh || "" }}
       />

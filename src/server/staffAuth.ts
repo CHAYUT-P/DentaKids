@@ -164,3 +164,28 @@ export async function setUserCookie(token: string): Promise<void> {
     // no request scope (script)
   }
 }
+
+/**
+ * Clinic-wide guard on wrong PINs, on top of the per-address limit: someone
+ * using many addresses could otherwise keep guessing. After
+ * WRONG_PINS_PER_HOUR wrong PINs from anywhere, PIN sign-in pauses until the
+ * hour is up (screens already signed in keep working — their token stays
+ * valid) and the developer gets an alert. At this rate a 6-digit PIN would
+ * take years to guess.
+ */
+const WRONG_PINS_PER_HOUR = 100;
+const WRONG_PIN_KEY = "stafflogin-wrong:all";
+
+export async function staffLoginPaused(): Promise<boolean> {
+  const { rateExceeded } = await import("@/server/queries");
+  return rateExceeded(WRONG_PIN_KEY, WRONG_PINS_PER_HOUR);
+}
+
+export async function noteWrongPin(): Promise<void> {
+  const { checkRate } = await import("@/server/queries");
+  const within = await checkRate(WRONG_PIN_KEY, WRONG_PINS_PER_HOUR, 3600);
+  if (!within) {
+    const { reportError } = await import("@/server/monitor");
+    await reportError("server", new Error("staff sign-in paused: too many wrong PINs this hour"), "staff login");
+  }
+}

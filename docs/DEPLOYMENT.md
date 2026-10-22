@@ -89,7 +89,11 @@ Everything runs on one server with Docker: Postgres, the app, and Caddy
 4. It installs Docker, a swap file and a firewall, copies the old database,
    builds and starts everything, applies schema changes, and sets the daily
    LINE reminders (18:00 / 07:00) and a nightly database backup
-   (`/opt/dentakids/backups`, 14 days).
+   (`deploy/backup.sh` → `/opt/dentakids/backups`, newest 14 good copies;
+   results in `backups/backup.log`). **These sit on the same disk as the
+   database**, so also copy them off the server (e.g. a weekly download to the
+   clinic PC, or `rclone` to Google Drive / Cloudflare R2), and try restoring
+   one once (`gunzip -c db-….sql.gz | psql`) so you know it works.
 5. Point LINE at the new address: LIFF endpoint `https://<domain>/` and webhook
    `https://<domain>/api/line/webhook`. Rebuild the staff app with
    `VITE_API_URL=https://<domain>`.

@@ -1,0 +1,13 @@
+# The VPS image is built from the whole repo (deploy/Dockerfile: COPY . .).
+# Secrets must never end up inside it: Next copies .env.production into the
+# standalone build, so the image would carry the database password, LINE
+# tokens and the staff PIN. The running container gets them from env_file.
+.env*
+!.env.example
+backups
+.git
+node_modules
+.next
+apps/staff-desktop/src-tauri/target
+apps/staff-desktop/dist
+docs/PRODUCTION_READINESS_REVIEW.md
