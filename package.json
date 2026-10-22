@@ -16,7 +16,8 @@
     "deploy:vps": "bash scripts/deploy-vps.sh",
     "concurrency:test": "tsx --import ./scripts/shimServerOnly.ts scripts/concurrencyTest.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "bench:live": "tsx scripts/liveUpdatesBench.ts"
+    "bench:live": "tsx scripts/liveUpdatesBench.ts",
+    "load:test": "tsx scripts/loadTest.ts"
   },
   "dependencies": {
     "@line/liff": "2.31.0",

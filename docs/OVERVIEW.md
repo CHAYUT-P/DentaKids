@@ -119,6 +119,8 @@ docs/                     this file, design notes (docs/design/), deployment gui
 | `pnpm db:test` | Database behaviour: seed, slots, holidays, holds, queue, walk-ins | 28 checks |
 | `pnpm concurrency:test` | 30 simultaneous bookings and payments: no double booking, no overpayment, retries are safe | 15 checks |
 | `pnpm test` | Unit tests: billing maths, Thai baht text, PromptPay QR, slots, age rules | 16 tests |
+| `pnpm load:test <scenario>` | k6 over real HTTP against a production build: spikes on one slot, rate limit, a promotion-sized rush, the limit of one server ([design/05](design/05-load-test.md)) | 6 scenarios, run by hand |
+| `pnpm bench:live` | Live updates: how fast a save reaches other screens, idle traffic vs polling ([design/04](design/04-live-updates.md)) | run by hand |
 | `pnpm typecheck`, `pnpm lint` | Types and lint across the website, backend and desktop app | — |
 
 The database tests run against the **local** database (`docker compose up -d`).
@@ -149,7 +151,7 @@ the `.exe` from Releases on each PC.
 | 2. CI: tests and checks on every push, billing-math unit tests | ✅ Done | [design/02](design/02-ci.md) |
 | 3. Monitoring: error tracking + uptime alerts | ✅ Done | [design/03](design/03-monitoring.md). Owner setup: `ALERT_LINE_USER_ID` + UptimeRobot |
 | 4. Live updates instead of 20-second polling | ✅ Done | [design/04](design/04-live-updates.md). A save shows on other screens in ~0.1 s instead of 10 s; idle traffic 566 MB/h → 2.4 KB/h per screen |
-| 5. HTTP load test (k6) against a deployed copy | ⏳ | |
+| 5. HTTP load test (k6) | ✅ Done (local) | [design/05](design/05-load-test.md). 200 families on one slot → 1 booking, 0 errors; one process handles ~30 families/s at p95 < 60 ms. Next: run it against a staging copy |
 
 ## 9. Things to know before changing anything
 

@@ -1,0 +1,330 @@
+k6 load test — production build (next start, one Node process) on Apple M3 Pro, local Postgres 16,
+test database with one year of bookings (7,834). Output of pnpm load:test <scenario>.
+
+################ same_slot
+Scenario same_slot · contested slot 2026-10-24 14:00 · 3 chairs · run mvjxvkol
+  █ THRESHOLDS 
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+  █ TOTAL RESULTS 
+    checks_total.......................: 200     296.462571/s
+    checks_succeeded...................: 100.00% 200 out of 200
+    checks_failed......................: 0.00%   0 out of 200
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=523.45ms p(95)=578.61ms p(99)=584.54ms max=650.69ms
+    booked..................................................................: 1      1.482313/s
+    refused.................................................................: 199    294.980259/s
+    HTTP
+    http_req_duration.......................................................: med=523.45ms p(95)=578.61ms p(99)=584.54ms max=650.69ms
+      { expected_response:true }............................................: med=523.45ms p(95)=578.61ms p(99)=584.54ms max=650.69ms
+    http_req_failed.........................................................: 0.00%  0 out of 200
+    http_reqs...............................................................: 200    296.462571/s
+    EXECUTION
+    iteration_duration......................................................: med=560.72ms p(95)=639.93ms p(99)=661.19ms max=670.13ms
+    iterations..............................................................: 200    296.462571/s
+    NETWORK
+    data_received...........................................................: 163 kB 242 kB/s
+    data_sent...............................................................: 90 kB  133 kB/s
+Database check
+  bookings saved by this run : 1
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 2 at 2026-10-24 14:00  (must be ≤ 3)
+  bookings in the contested slot: 1  (must be 1)
+✓ database check passed
+
+################ any_slot
+Scenario any_slot · contested slot 2026-10-24 14:00 · 3 chairs · run mvjxvqr9
+  █ THRESHOLDS 
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+  █ TOTAL RESULTS 
+    checks_total.......................: 200     233.776905/s
+    checks_succeeded...................: 100.00% 200 out of 200
+    checks_failed......................: 0.00%   0 out of 200
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=562.08ms p(95)=766.63ms p(99)=769.51ms max=826.91ms
+    booked..................................................................: 2      2.337769/s
+    refused.................................................................: 198    231.439136/s
+    HTTP
+    http_req_duration.......................................................: med=562.08ms p(95)=766.63ms p(99)=769.51ms max=826.91ms
+      { expected_response:true }............................................: med=562.08ms p(95)=766.63ms p(99)=769.51ms max=826.91ms
+    http_req_failed.........................................................: 0.00%  0 out of 200
+    http_reqs...............................................................: 200    233.776905/s
+    EXECUTION
+    iteration_duration......................................................: med=601.53ms p(95)=779.19ms p(99)=826.23ms max=852.64ms
+    iterations..............................................................: 200    233.776905/s
+    NETWORK
+    data_received...........................................................: 237 kB 277 kB/s
+    data_sent...............................................................: 90 kB  105 kB/s
+Database check
+  bookings saved by this run : 2
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 3 at 2026-10-24 14:00  (must be ≤ 3)
+  bookings in the contested slot: 2  (must be ≤ 3)
+✓ database check passed
+
+################ same_ip
+Scenario same_ip · contested slot 2026-10-24 14:00 · 3 chairs · run mvjxw7q3
+  █ THRESHOLDS 
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+  █ TOTAL RESULTS 
+    checks_total.......................: 30      64.402277/s
+    checks_succeeded...................: 100.00% 30 out of 30
+    checks_failed......................: 0.00%   0 out of 30
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=20.18ms p(95)=24.65ms p(99)=30.95ms max=33.13ms
+    booked..................................................................: 20     42.934851/s
+    refused.................................................................: 10     21.467426/s
+    HTTP
+    http_req_duration.......................................................: med=20.18ms p(95)=24.65ms p(99)=30.95ms max=33.13ms
+      { expected_response:true }............................................: med=20.18ms p(95)=24.65ms p(99)=30.95ms max=33.13ms
+    http_req_failed.........................................................: 0.00%  0 out of 30
+    http_reqs...............................................................: 30     64.402277/s
+    EXECUTION
+    iteration_duration......................................................: med=20.51ms p(95)=25.92ms p(99)=31.77ms max=33.46ms
+    iterations..............................................................: 30     64.402277/s
+    NETWORK
+    data_received...........................................................: 1.5 MB 3.2 MB/s
+    data_sent...............................................................: 13 kB  29 kB/s
+Database check
+  bookings saved by this run : 20
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 2 at 2026-10-24 10:00  (must be ≤ 3)
+  bookings from one address  : 20  (must be ≤ 20)
+✓ database check passed
+
+################ journey
+Scenario journey · contested slot 2026-10-24 14:00 · 3 chairs · run mvjxwcj6
+  █ THRESHOLDS 
+    action_book_ms
+    ✓ 'p(95)<800' p(95)=55.3ms
+    action_hold_ms
+    ✓ 'p(95)<500' p(95)=10.14ms
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+    page_book_ms
+    ✓ 'p(95)<1500' p(95)=26.87ms
+  █ TOTAL RESULTS 
+    checks_total.......................: 5798    42.947744/s
+    checks_succeeded...................: 100.00% 5798 out of 5798
+    checks_failed......................: 0.00%   0 out of 5798
+    ✓ page loads
+    ✓ hold answered
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=31.37ms p(95)=55.3ms  p(99)=69.79ms max=84.67ms 
+    action_hold_ms..........................................................: med=5.94ms  p(95)=10.14ms p(99)=13.79ms max=27.16ms 
+    booked..................................................................: 520    3.851816/s
+    page_book_ms............................................................: med=15.25ms p(95)=26.87ms p(99)=44.9ms  max=81.41ms 
+    refused.................................................................: 2119   15.696148/s
+    HTTP
+    http_req_duration.......................................................: med=14.19ms p(95)=34.1ms  p(99)=48.65ms max=84.67ms 
+      { expected_response:true }............................................: med=14.19ms p(95)=34.1ms  p(99)=48.65ms max=84.67ms 
+    http_req_failed.........................................................: 0.00%  0 out of 5798
+    http_reqs...............................................................: 5798   42.947744/s
+    EXECUTION
+    iteration_duration......................................................: med=21.8ms  p(95)=74.13ms p(99)=96.19ms max=156.09ms
+    iterations..............................................................: 2639   19.547964/s
+    vus.....................................................................: 0      min=0         max=2  
+    vus_max.................................................................: 100    min=100       max=100
+    NETWORK
+    data_received...........................................................: 316 MB 2.3 MB/s
+    data_sent...............................................................: 1.5 MB 11 kB/s
+Database check
+  bookings saved by this run : 520
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 3 at 2026-10-28 13:30  (must be ≤ 3)
+✓ database check passed
+
+################ steady-40
+Scenario steady · contested slot 2026-10-24 14:00 · 3 chairs · run mvjy2c4k
+  █ THRESHOLDS 
+    action_book_ms
+    ✗ 'p(95)<800' p(95)=9.2s
+    action_hold_ms
+    ✗ 'p(95)<500' p(95)=2.1s
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+    page_book_ms
+    ✗ 'p(95)<1500' p(95)=1.89s
+  █ TOTAL RESULTS 
+    checks_total.......................: 2825    94.035123/s
+    checks_succeeded...................: 100.00% 2825 out of 2825
+    checks_failed......................: 0.00%   0 out of 2825
+    ✓ page loads
+    ✓ hold answered
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=4.47s p(95)=9.2s   p(99)=9.92s  max=10.13s
+    action_hold_ms..........................................................: med=1.39s p(95)=2.1s   p(99)=2.64s  max=2.68s 
+    booked..................................................................: 505    16.809818/s
+    page_book_ms............................................................: med=1.25s p(95)=1.89s  p(99)=2.14s  max=2.21s 
+    refused.................................................................: 619    20.60451/s
+    HTTP
+    http_req_duration.......................................................: med=1.42s p(95)=5.55s  p(99)=9.2s   max=10.13s
+      { expected_response:true }............................................: med=1.42s p(95)=5.55s  p(99)=9.2s   max=10.13s
+    http_req_failed.........................................................: 0.00%  0 out of 2825
+    http_reqs...............................................................: 2825   94.035123/s
+    EXECUTION
+    dropped_iterations......................................................: 77     2.563081/s
+    iteration_duration......................................................: med=3.6s  p(95)=12.02s p(99)=13.15s max=13.21s
+    iterations..............................................................: 1124   37.414329/s
+    vus.....................................................................: 1      min=1         max=274
+    vus_max.................................................................: 277    min=200       max=277
+    NETWORK
+    data_received...........................................................: 156 MB 5.2 MB/s
+    data_sent...............................................................: 814 kB 27 kB/s
+time="2026-10-22T19:39:26Z" level=error msg="thresholds on metrics 'action_book_ms, action_hold_ms, page_book_ms' have been crossed"
+Database check
+  bookings saved by this run : 505
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 3 at 2026-10-28 13:30  (must be ≤ 3)
+✓ database check passed
+
+################ steady-60
+Scenario steady · contested slot 2026-10-24 14:00 · 3 chairs · run mvjy305h
+  █ THRESHOLDS 
+    action_book_ms
+    ✗ 'p(95)<800' p(95)=14.12s
+    action_hold_ms
+    ✗ 'p(95)<500' p(95)=2.9s
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+    page_book_ms
+    ✗ 'p(95)<1500' p(95)=2.89s
+  █ TOTAL RESULTS 
+    checks_total.......................: 3836    117.431423/s
+    checks_succeeded...................: 100.00% 3836 out of 3836
+    checks_failed......................: 0.00%   0 out of 3836
+    ✓ page loads
+    ✓ hold answered
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=4.43s p(95)=14.12s p(99)=15.22s max=15.35s
+    action_hold_ms..........................................................: med=2.08s p(95)=2.9s   p(99)=3.58s  max=3.76s 
+    booked..................................................................: 519    15.888141/s
+    page_book_ms............................................................: med=1.91s p(95)=2.89s  p(99)=2.91s  max=2.92s 
+    refused.................................................................: 1062   32.510994/s
+    HTTP
+    http_req_duration.......................................................: med=2.13s p(95)=7.5s   p(99)=13.86s max=15.35s
+      { expected_response:true }............................................: med=2.13s p(95)=7.5s   p(99)=13.86s max=15.35s
+    http_req_failed.........................................................: 0.00%  0 out of 3836
+    http_reqs...............................................................: 3836   117.431423/s
+    EXECUTION
+    dropped_iterations......................................................: 220    6.734857/s
+    iteration_duration......................................................: med=5.17s p(95)=16.21s p(99)=18.69s max=19.34s
+    iterations..............................................................: 1581   48.399135/s
+    vus.....................................................................: 94     min=42        max=417
+    vus_max.................................................................: 420    min=200       max=420
+    NETWORK
+    data_received...........................................................: 205 MB 6.3 MB/s
+    data_sent...............................................................: 1.1 MB 33 kB/s
+time="2026-10-22T19:40:00Z" level=error msg="thresholds on metrics 'action_book_ms, action_hold_ms, page_book_ms' have been crossed"
+Database check
+  bookings saved by this run : 519
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 3 at 2026-10-23 15:00  (must be ≤ 3)
+✓ database check passed
+
+################ steady-80
+Scenario steady · contested slot 2026-10-24 14:00 · 3 chairs · run mvjy3q1z
+  █ THRESHOLDS 
+    action_book_ms
+    ✗ 'p(95)<800' p(95)=21.44s
+    action_hold_ms
+    ✗ 'p(95)<500' p(95)=5.92s
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+    page_book_ms
+    ✗ 'p(95)<1500' p(95)=5.02s
+  █ TOTAL RESULTS 
+    checks_total.......................: 4339    121.634611/s
+    checks_succeeded...................: 100.00% 4339 out of 4339
+    checks_failed......................: 0.00%   0 out of 4339
+    ✓ page loads
+    ✓ hold answered
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=6.47s p(95)=21.44s p(99)=23.34s max=23.62s
+    action_hold_ms..........................................................: med=3.47s p(95)=5.92s  p(99)=6.45s  max=6.47s 
+    booked..................................................................: 520    14.577091/s
+    page_book_ms............................................................: med=3.41s p(95)=5.02s  p(99)=5.08s  max=5.09s 
+    refused.................................................................: 1236   34.648624/s
+    HTTP
+    http_req_duration.......................................................: med=3.66s p(95)=11.57s p(99)=21.37s max=23.62s
+      { expected_response:true }............................................: med=3.66s p(95)=11.57s p(99)=21.37s max=23.62s
+    http_req_failed.........................................................: 0.00%  0 out of 4339
+    http_reqs...............................................................: 4339   121.634611/s
+    EXECUTION
+    dropped_iterations......................................................: 645    18.081199/s
+    iteration_duration......................................................: med=8.75s p(95)=23.5s  p(99)=27.62s max=27.96s
+    iterations..............................................................: 1756   49.225715/s
+    vus.....................................................................: 75     min=72        max=844
+    vus_max.................................................................: 845    min=200       max=845
+    NETWORK
+    data_received...........................................................: 223 MB 6.3 MB/s
+    data_sent...............................................................: 1.2 MB 35 kB/s
+time="2026-10-22T19:40:38Z" level=error msg="thresholds on metrics 'action_book_ms, action_hold_ms, page_book_ms' have been crossed"
+Database check
+  bookings saved by this run : 520
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 3 at 2026-10-28 13:30  (must be ≤ 3)
+✓ database check passed
+
+################ stress
+Scenario stress · contested slot 2026-10-24 14:00 · 3 chairs · run mvjxzo9k
+time="2026-10-22T19:37:28Z" level=warning msg="Insufficient VUs, reached 1000 active VUs and cannot initialize more" executor=ramping-arrival-rate scenario=stress
+time="2026-10-22T19:37:36Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+time="2026-10-22T19:37:37Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+time="2026-10-22T19:37:37Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+time="2026-10-22T19:37:37Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+time="2026-10-22T19:37:38Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+time="2026-10-22T19:37:38Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+time="2026-10-22T19:37:38Z" level=warning msg="Request Failed" error="Get \"http://host.docker.internal:3002/book\": dial: i/o timeout"
+  █ THRESHOLDS 
+    action_book_ms
+    ✗ 'p(95)<800' p(95)=40.18s
+    action_hold_ms
+    ✗ 'p(95)<500' p(95)=8.37s
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.05%
+    page_book_ms
+    ✗ 'p(95)<1500' p(95)=8.2s
+  █ TOTAL RESULTS 
+    checks_total.......................: 12871  121.430606/s
+    checks_succeeded...................: 99.94% 12864 out of 12871
+    checks_failed......................: 0.05%  7 out of 12871
+    ✗ page loads
+      ↳  99% — ✓ 6033 / ✗ 7
+    ✓ hold answered
+    ✓ booking answered
+    CUSTOM
+    action_book_ms..........................................................: med=8.69s p(95)=40.18s p(99)=47.91s max=48.85s
+    action_hold_ms..........................................................: med=7.22s p(95)=8.37s  p(99)=9.64s  max=10.62s
+    booked..................................................................: 520    4.905906/s
+    page_book_ms............................................................: med=7.36s p(95)=8.2s   p(99)=8.71s  max=8.76s 
+    refused.................................................................: 5520   52.078078/s
+    HTTP
+    http_req_duration.......................................................: med=7.31s p(95)=8.71s  p(99)=24.27s max=48.85s
+      { expected_response:true }............................................: med=7.31s p(95)=8.71s  p(99)=24.29s max=48.85s
+    http_req_failed.........................................................: 0.05%  7 out of 12871
+    http_reqs...............................................................: 12871  121.430606/s
+    EXECUTION
+    dropped_iterations......................................................: 11709  110.467793/s
+    iteration_duration......................................................: med=14.8s p(95)=21.18s p(99)=45.52s max=1m5s  
+    iterations..............................................................: 6040   56.983984/s
+    vus.....................................................................: 1      min=1          max=1000
+    vus_max.................................................................: 1000   min=200        max=1000
+    NETWORK
+    data_received...........................................................: 671 MB 6.3 MB/s
+    data_sent...............................................................: 3.2 MB 31 kB/s
+time="2026-10-22T19:38:37Z" level=error msg="thresholds on metrics 'action_book_ms, action_hold_ms, page_book_ms' have been crossed"
+Database check
+  bookings saved by this run : 520
+  dentist double-bookings    : 0  (must be 0)
+  most bookings in one slot   : 3 at 2026-10-28 13:30  (must be ≤ 3)
+✓ database check passed
