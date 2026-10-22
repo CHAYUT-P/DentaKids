@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
-import { coveredTimes, durationTh, slotsNeeded, timeRange } from "@/lib/slots";
+import { coveredTimes, dentistDayTimes, durationTh, slotsNeeded, timeRange } from "@/lib/slots";
+import { weekdayIndex } from "@/lib/dates";
 import { useStaff, type BookingSource } from "@/lib/staffStore";
 import type { IconKey } from "@/data/icons";
 import { IconX, IconPlus, IconPhone, IconWalkIn, IconSmartphone } from "@/components/staff/shell/staffIcons";
@@ -38,7 +39,7 @@ export function BookingModal({
   const tr = useTreatments();
 
   const [date, setDate] = useState(initialDate || today);
-  const [time, setTime] = useState(initialTime || "10:00");
+  const [time, setTime] = useState(initialTime || "10:30");
   const [dentistSlug, setDentistSlug] = useState(initialDentistSlug || dentists[0]?.slug || "naree");
   const [treatmentKey, setTreatmentKey] = useState<IconKey>("checkup");
   /** the name the family gives at the desk — a nickname is enough */
@@ -95,11 +96,14 @@ export function BookingModal({
     onClose();
   };
 
-  const times = [
-    "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-    "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-    "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00"
-  ];
+  // the times this dentist works that day (room left for the whole treatment);
+  // the picked time stays listed even if it falls outside
+  const shiftTimes = dentistDayTimes(
+    dentists.find((d) => d.slug === dentistSlug)?.shifts,
+    weekdayIndex(date),
+    durationMin,
+  );
+  const times = shiftTimes.includes(time) || !time ? shiftTimes : [...shiftTimes, time].sort();
 
   return (
     <div className="modal-overlay" onClick={onClose}>

@@ -136,6 +136,18 @@ export interface StaffBootstrap {
   dentistLeaves: DentistLeave[];
   lineUnread: number;
   settings: { chairs: number };
+  clinicInfo: {
+    phone: string;
+    phoneDisplay: string;
+    lineId: string;
+    lineUrl: string;
+    mapUrl: string;
+    directionsUrl: string;
+    addressTh: string;
+    addressEn: string;
+    landmarkTh: string;
+    landmarkEn: string;
+  } | null;
 }
 
 /* ── reads ──────────────────────────────────────────────────────────────── */

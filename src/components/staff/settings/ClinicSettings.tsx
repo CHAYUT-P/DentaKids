@@ -2,14 +2,7 @@
 
 import React, { useState } from "react";
 import { useStaff } from "@/lib/staffStore";
-import { staffUpdateClinicInfo } from "@/server/actions";
-import {
-  telDisplay,
-  lineId,
-  landmark,
-  geo,
-  type DayKey,
-} from "@/data/clinic";
+import type { DayKey } from "@/data/clinic";
 import {
   IconClock,
   IconCheck,
@@ -44,6 +37,8 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
     holidays,
     settings,
     updateChairs,
+    clinicInfo,
+    updateClinicInfo,
     updateDayOpen,
     updateDayTime,
     addHoliday,
@@ -60,32 +55,17 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   const [selHover, setSelHover] = useState<string | null>(null);
   const [newHolidayName, setNewHolidayName] = useState("");
 
-  // Booking rules state
+  // chairs: the one booking rule staff set here (the others are fixed, see below)
   const [chairCount, setChairCount] = useState<number>(settings.chairs);
-  const [slotGranularity, setSlotGranularity] = useState("30");
-  const [advanceDays, setAdvanceDays] = useState("14");
-  const [leadCutoffMin, setLeadCutoffMin] = useState("60");
-  const [hasLunchBreak, setHasLunchBreak] = useState(true);
-  const [lunchStart, setLunchStart] = useState("12:00");
-  const [lunchEnd, setLunchEnd] = useState("13:00");
-  const [cancelDeadlineHours, setCancelDeadlineHours] = useState("2");
 
-  // Clinic profile state
-  const [clinicNameTh, setClinicNameTh] = useState("Denta Kids คลินิกทันตกรรมสำหรับเด็ก");
-  const [clinicNameEn, setClinicNameEn] = useState("Denta Kids Pediatric Dental Clinic");
-  const [tel, setTel] = useState(telDisplay);
-  const [line, setLine] = useState(lineId);
-  const [addressTh, setAddressTh] = useState(landmark.th);
-  const [addressEn, setAddressEn] = useState(landmark.en);
-  const [latitude, setLatitude] = useState(String(geo.lat));
-  const [longitude, setLongitude] = useState(String(geo.lng));
-
-  // Notification settings state
-  const [enableD1Reminder, setEnableD1Reminder] = useState(true);
-  const [d1ReminderTime, setD1ReminderTime] = useState("18:00");
-  const [enableD0Reminder, setEnableD0Reminder] = useState(true);
-  const [d0ReminderTime, setD0ReminderTime] = useState("08:00");
-  const [soundAlerts, setSoundAlerts] = useState(true);
+  // the clinic's contact details, starting from what is saved — so saving
+  // never puts demo values back
+  const [tel, setTel] = useState(clinicInfo?.phoneDisplay ?? "");
+  const [line, setLine] = useState(clinicInfo?.lineId ?? "");
+  const [addressTh, setAddressTh] = useState(clinicInfo?.addressTh ?? "");
+  const [addressEn, setAddressEn] = useState(clinicInfo?.addressEn ?? "");
+  const [landmarkTh, setLandmarkTh] = useState(clinicInfo?.landmarkTh ?? "");
+  const [mapLink, setMapLink] = useState(clinicInfo?.mapUrl ?? "");
 
   const handlePickDay = (iso: string) => {
     if (!selStart || (selStart && selEnd)) {
@@ -124,26 +104,28 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    // chairs cap one wall-clock slot for online booking (see settlePool) —
-    // persisted, unlike the display-only knobs below which are still local
-    if (chairCount !== settings.chairs) updateChairs(chairCount);
-    // clinic contact details now persist to Postgres (clinic_info) — the
-    // patient /clinic page and the home info card read this same row
-    // the form starts from the built-in defaults, not the saved row — so only
-    // write contact details someone actually edited, or a save on any other
-    // group would reset the clinic's real phone/LINE/address to those defaults
-    const profileEdited =
-      tel !== telDisplay || line !== lineId || addressTh !== landmark.th || addressEn !== landmark.en;
-    if (profileEdited) {
-      staffUpdateClinicInfo({
-        phone: tel.replace(/\D/g, "") || undefined,
-        phoneDisplay: tel || undefined,
-        lineId: line || undefined,
-        addressTh: addressTh || undefined,
-        addressEn: addressEn || undefined,
-      });
+    if (activeTab === "booking") {
+      if (chairCount !== settings.chairs) updateChairs(chairCount);
+      showToast("บันทึกจำนวนเก้าอี้แล้ว");
+      return;
     }
-    showToast("บันทึกการตั้งค่าคลินิกเรียบร้อยแล้ว — เว็บผู้ปกครองอัปเดตทันที");
+    if (activeTab === "profile") {
+      const link = mapLink.trim();
+      const lineHandle = line.trim();
+      updateClinicInfo({
+        phone: tel.replace(/\D/g, ""),
+        phoneDisplay: tel.trim(),
+        lineId: lineHandle,
+        lineUrl: lineHandle ? `https://line.me/R/ti/p/${encodeURIComponent(lineHandle)}` : "",
+        addressTh: addressTh.trim(),
+        addressEn: addressEn.trim(),
+        landmarkTh: landmarkTh.trim(),
+        // one Google Maps link opens the pin; Google offers directions from it
+        mapUrl: link,
+        directionsUrl: link,
+      });
+      showToast("บันทึกข้อมูลคลินิกแล้ว — หน้าเว็บผู้ปกครองอัปเดตทันที");
+    }
   };
 
   return (
@@ -400,13 +382,12 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
         )}
 
         {/* ====================================================================
-            TAB 2: กฎการจอง & ห้องตรวจ
+            TAB 2: กฎการจอง & เก้าอี้ — the chair count is set here; the other
+            rules are fixed in the app and listed as they really work
             ==================================================================== */}
         {activeTab === "booking" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: "20px", alignItems: "start" }}>
-            {/* Chairs & Capacity */}
-            <div
-              style={{
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "20px", alignItems: "start" }}>
+            <div style={{
                 background: "#ffffff",
                 border: "1px solid var(--staff-border)",
                 borderRadius: "14px",
@@ -415,51 +396,24 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                 flexDirection: "column",
                 gap: "16px",
                 boxShadow: "var(--staff-shadow-sm)",
-              }}
-            >
-              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>
-                ความจุห้องตรวจและเก้าอี้ทำฟัน (Clinic Chairs & Room Capacity)
-              </strong>
-
+              }}>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>เก้าอี้ทำฟัน</strong>
               <div className="form-group">
-                <label>จำนวนเก้าอี้ทำฟันที่พร้อมใช้งาน (Active Dental Chairs)</label>
-                <select
-                  className="form-control"
-                  value={chairCount}
-                  onChange={(e) => setChairCount(Number(e.target.value))}
-                >
-                  <option value={1}>1 เก้าอี้ (คลินิกขนาดเล็ก)</option>
-                  <option value={2}>2 เก้าอี้</option>
-                  <option value={3}>3 เก้าอี้ (มาตรฐาน Denta Kids)</option>
-                  <option value={4}>4 เก้าอี้</option>
-                  <option value={5}>5 เก้าอี้</option>
+                <label>จำนวนเก้าอี้ที่ใช้งานได้</label>
+                <select className="form-control" value={chairCount} onChange={(e) => setChairCount(Number(e.target.value))}>
+                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n}>
+                      {n} เก้าอี้
+                    </option>
+                  ))}
                 </select>
-                <span style={{ fontSize: "11.5px", color: "var(--staff-ink-muted)" }}>
-                  จำกัดจำนวนคนไข้ที่สามารถจองในเวลาเดียวกันไม่เกินจำนวนเก้าอี้
-                </span>
-              </div>
-
-              <div className="form-group">
-                <label>ความยาวต่อ 1 ช่องเวลา (Slot Duration)</label>
-                <select
-                  className="form-control"
-                  value={slotGranularity}
-                  onChange={(e) => setSlotGranularity(e.target.value)}
-                >
-                  <option value="15">15 นาที</option>
-                  <option value="30">30 นาที (ค่าเริ่มต้นที่แนะนำ)</option>
-                  <option value="45">45 นาที</option>
-                  <option value="60">60 นาที (1 ชั่วโมง)</option>
-                </select>
-                <span style={{ fontSize: "11.5px", color: "var(--staff-ink-muted)" }}>
-                  ระยะเวลาพื้นฐานสำหรับนัดหมายตรวจสุขภาพฟันและหัตถการทั่วไป
+                <span className="settings-hint">
+                  เมื่อคนไข้เลือก “ทันตแพทย์ท่านใดก็ได้” ระบบรับจองในเวลาเดียวกันได้ไม่เกินจำนวนเก้าอี้
                 </span>
               </div>
             </div>
 
-            {/* Lunch Break & Rules */}
-            <div
-              style={{
+            <div style={{
                 background: "#ffffff",
                 border: "1px solid var(--staff-border)",
                 borderRadius: "14px",
@@ -468,279 +422,36 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                 flexDirection: "column",
                 gap: "16px",
                 boxShadow: "var(--staff-shadow-sm)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>
-                    ช่วงเวลาพักเที่ยง (Lunch Break Slot Rules)
-                  </strong>
-                  <div style={{ fontSize: "12px", color: "var(--staff-ink-muted)", marginTop: "2px" }}>
-                    เว้นว่างไม่เปิดให้คนไข้จองคิวออนไลน์ในช่วงพัก
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setHasLunchBreak(!hasLunchBreak)}
-                  className={`status-pill ${hasLunchBreak ? "completed" : "cancelled"}`}
-                  style={{ cursor: "pointer", border: "none" }}
-                >
-                  {hasLunchBreak ? (
-                    <>
-                      <IconCheck size={11} />
-                      <span>เปิดใช้พักเที่ยง</span>
-                    </>
-                  ) : (
-                    <>
-                      <IconX size={11} />
-                      <span>ไม่พักเที่ยง</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {hasLunchBreak && (
-                <div className="form-row-2">
-                  <div className="form-group">
-                    <label>เริ่มพักเที่ยง</label>
-                    <input
-                      type="time"
-                      className="form-control"
-                      value={lunchStart}
-                      onChange={(e) => setLunchStart(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>สิ้นสุดพักเที่ยง</label>
-                    <input
-                      type="time"
-                      className="form-control"
-                      value={lunchEnd}
-                      onChange={(e) => setLunchEnd(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Advance Booking & Cutoff */}
-            <div
-              style={{
-                gridColumn: "1 / -1",
-                background: "#ffffff",
-                border: "1px solid var(--staff-border)",
-                borderRadius: "14px",
-                padding: "22px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-                boxShadow: "var(--staff-shadow-sm)",
-              }}
-            >
-              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>
-                กรอบเวลาการจองและยกเลิกนัด (Advance Window & Cancellation Policy)
-              </strong>
-
-              <div className="form-row-2">
-                <div className="form-group">
-                  <label>เปิดให้จองล่วงหน้าได้สูงสุด (วัน)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={advanceDays}
-                    onChange={(e) => setAdvanceDays(e.target.value)}
-                    min={1}
-                    max={60}
-                  />
-                  <span style={{ fontSize: "11.5px", color: "var(--staff-ink-muted)" }}>
-                    ผู้ปกครองสามารถเลือกวันตรวจได้ไม่เกิน {advanceDays} วันนับจากวันนี้
-                  </span>
-                </div>
-
-                <div className="form-group">
-                  <label>ปิดรับการจองก่อนถึงเวลาเริ่มนัด (นาที)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={leadCutoffMin}
-                    onChange={(e) => setLeadCutoffMin(e.target.value)}
-                    min={0}
-                    max={240}
-                  />
-                  <span style={{ fontSize: "11.5px", color: "var(--staff-ink-muted)" }}>
-                    ป้องกันการจองฉุกเฉินกระชั้นชิดเกินกว่าที่คลินิกจะเตรียมห้องทัน
-                  </span>
-                </div>
-              </div>
-
-              <div className="form-row-2">
-                <div className="form-group">
-                  <label>ผู้ปกครองสามารถกดยกเลิกนัดเองได้ล่วงหน้าอย่างน้อย (ชั่วโมง)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={cancelDeadlineHours}
-                    onChange={(e) => setCancelDeadlineHours(e.target.value)}
-                    min={1}
-                    max={48}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>รูปแบบการยืนยันการจองออนไลน์ (LINE LIFF Booking Flow)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value="อนุมัติและออกรหัสนัดทันที (Auto-confirmed, No waiting approval)"
-                    disabled
-                    style={{ background: "var(--staff-surface-subtle)" }}
-                  />
-                </div>
-              </div>
+              }}>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>กฎการจองที่ใช้อยู่</strong>
+              <ul className="rules-list">
+                <li>
+                  <strong>เวลาที่จองได้</strong> = เวลาเข้าเวรของคุณหมอแต่ละท่าน — ตั้งใน “ทันตแพทย์ &amp; เวรตรวจ”
+                </li>
+                <li>
+                  <strong>1 คิว = 30 นาที</strong> — บริการที่ใช้เวลานานกว่า (เช่น ฟอกสีฟัน 1 ชม.) กันหลายช่องอัตโนมัติ ตั้งใน “บริการ &amp; ราคา”
+                </li>
+                <li>
+                  <strong>จองล่วงหน้าได้ 14 วัน</strong> และต้องจองก่อนเวลานัดอย่างน้อย <strong>1 ชั่วโมง</strong>
+                </li>
+                <li>
+                  ผู้ปกครอง<strong>เลื่อน/ยกเลิกนัดเองได้</strong>ทาง LINE จนกว่าจะเช็คอิน
+                </li>
+                <li>
+                  จองแล้ว<strong>ยืนยันทันที</strong> ได้รหัสจองและข้อความยืนยันทาง LINE
+                </li>
+              </ul>
             </div>
           </div>
         )}
 
         {/* ====================================================================
-            TAB 3: ข้อมูลคลินิก & ที่ตั้ง
+            TAB 3: ข้อมูลคลินิก — saved to clinic_info; the patient site's
+            clinic page and home card read the same row
             ==================================================================== */}
         {activeTab === "profile" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: "20px", alignItems: "start" }}>
-              {/* General Info */}
-              <div
-                style={{
-                  background: "#ffffff",
-                  border: "1px solid var(--staff-border)",
-                  borderRadius: "14px",
-                  padding: "22px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "16px",
-                  boxShadow: "var(--staff-shadow-sm)",
-                }}
-              >
-                <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>
-                  ข้อมูลชื่อคลินิกและการติดต่อ (Clinic Branding & Contacts)
-                </strong>
-
-                <div className="form-group">
-                  <label>ชื่อคลินิก (ภาษาไทย) *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={clinicNameTh}
-                    onChange={(e) => setClinicNameTh(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Clinic Name (English) *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={clinicNameEn}
-                    onChange={(e) => setClinicNameEn(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="form-row-2">
-                  <div className="form-group">
-                    <label>เบอร์โทรศัพท์คลินิก *</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={tel}
-                      onChange={(e) => setTel(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>LINE Official Account ID *</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={line}
-                      onChange={(e) => setLine(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Address & GPS */}
-              <div
-                style={{
-                  background: "#ffffff",
-                  border: "1px solid var(--staff-border)",
-                  borderRadius: "14px",
-                  padding: "22px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "16px",
-                  boxShadow: "var(--staff-shadow-sm)",
-                }}
-              >
-                <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>
-                  ที่อยู่และพิกัดแผนที่ (Location & Navigation)
-                </strong>
-
-                <div className="form-group">
-                  <label>ที่อยู่และจุดสังเกต (ภาษาไทย)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={addressTh}
-                    onChange={(e) => setAddressTh(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Address & Landmarks (English)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={addressEn}
-                    onChange={(e) => setAddressEn(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-row-2">
-                  <div className="form-group">
-                    <label>พิกัดละติจูด (Latitude)</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={latitude}
-                      onChange={(e) => setLatitude(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>พิกัดลองจิจูด (Longitude)</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={longitude}
-                      onChange={(e) => setLongitude(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* ====================================================================
-            TAB 4: การแจ้งเตือน & บัญชีผู้ใช้
-            ==================================================================== */}
-        {activeTab === "staff_notif" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            {/* LINE Reminders */}
-            <div
-              style={{
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "20px", alignItems: "start" }}>
+            <div style={{
                 background: "#ffffff",
                 border: "1px solid var(--staff-border)",
                 borderRadius: "14px",
@@ -749,121 +460,126 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                 flexDirection: "column",
                 gap: "16px",
                 boxShadow: "var(--staff-shadow-sm)",
-              }}
-            >
-              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>
-                ระบบส่งข้อความแจ้งเตือนอัตโนมัติ (LINE Messaging API Reminders)
-              </strong>
-
-              <div
-                style={{
-                  background: "var(--staff-surface-subtle)",
-                  padding: "14px 18px",
-                  borderRadius: "10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <div>
-                  <strong style={{ fontSize: "14px" }}>เตือนนัดหมายล่วงหน้า 1 วัน (D-1 Reminder)</strong>
-                  <div style={{ fontSize: "12px", color: "var(--staff-ink-muted)", marginTop: "2px" }}>
-                    ส่งข้อความเตือนผู้ปกครองทาง LINE ในช่วงเย็นก่อนถึงวันนัด 1 วัน
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <input
-                    type="time"
-                    className="form-control"
-                    style={{ width: "105px", padding: "5px 8px" }}
-                    value={d1ReminderTime}
-                    onChange={(e) => setD1ReminderTime(e.target.value)}
-                    disabled={!enableD1Reminder}
-                  />
-                  <input
-                    type="checkbox"
-                    checked={enableD1Reminder}
-                    onChange={() => setEnableD1Reminder(!enableD1Reminder)}
-                  />
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: "var(--staff-surface-subtle)",
-                  padding: "14px 18px",
-                  borderRadius: "10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <div>
-                  <strong style={{ fontSize: "14px" }}>เตือนนัดหมายในวันตรวจ (Day-Of Morning Reminder)</strong>
-                  <div style={{ fontSize: "12px", color: "var(--staff-ink-muted)", marginTop: "2px" }}>
-                    ส่งข้อความเตือนในเช้าวันนัดหมายเพื่อป้องกันการลืมนัด
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <input
-                    type="time"
-                    className="form-control"
-                    style={{ width: "105px", padding: "5px 8px" }}
-                    value={d0ReminderTime}
-                    onChange={(e) => setD0ReminderTime(e.target.value)}
-                    disabled={!enableD0Reminder}
-                  />
-                  <input
-                    type="checkbox"
-                    checked={enableD0Reminder}
-                    onChange={() => setEnableD0Reminder(!enableD0Reminder)}
-                  />
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: "var(--staff-surface-subtle)",
-                  padding: "14px 18px",
-                  borderRadius: "10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <div>
-                  <strong style={{ fontSize: "14px" }}>เสียงแจ้งเตือนเมื่อมีการจองออนไลน์ใหม่ (In-App Audio Chime)</strong>
-                  <div style={{ fontSize: "12px", color: "var(--staff-ink-muted)", marginTop: "2px" }}>
-                    ส่งเสียงแจ้งเตือนที่เครื่องเคาน์เตอร์ทันทีเมื่อคนไข้กดจองผ่าน LINE
-                  </div>
-                </div>
+              }}>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>การติดต่อ</strong>
+              <div className="form-group">
+                <label>เบอร์โทรศัพท์คลินิก</label>
                 <input
-                  type="checkbox"
-                  checked={soundAlerts}
-                  onChange={() => setSoundAlerts(!soundAlerts)}
+                  type="tel"
+                  className="form-control"
+                  placeholder="เช่น 087-780-6669"
+                  value={tel}
+                  onChange={(e) => setTel(e.target.value)}
                 />
+              </div>
+              <div className="form-group">
+                <label>LINE Official Account ID</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="เช่น @dentakids"
+                  value={line}
+                  onChange={(e) => setLine(e.target.value)}
+                />
+                <span className="settings-hint">ใช้ทำปุ่ม LINE บนหน้า “เกี่ยวกับคลินิก”</span>
               </div>
             </div>
 
-            {/* How the desk signs in — the real mechanism, not a mock account list */}
-            <div
-              style={{
+            <div style={{
                 background: "#ffffff",
                 border: "1px solid var(--staff-border)",
                 borderRadius: "14px",
                 padding: "22px",
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px",
-              }}
-            >
+                gap: "16px",
+                boxShadow: "var(--staff-shadow-sm)",
+              }}>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>ที่อยู่และแผนที่</strong>
+              <div className="form-group">
+                <label>ที่อยู่ (ภาษาไทย)</label>
+                <textarea
+                  className="form-control"
+                  rows={2}
+                  style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+                  value={addressTh}
+                  onChange={(e) => setAddressTh(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>จุดสังเกต (ไม่บังคับ)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="เช่น ตรงข้ามโรงเรียน…"
+                  value={landmarkTh}
+                  onChange={(e) => setLandmarkTh(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>Address (English)</label>
+                <input type="text" className="form-control" value={addressEn} onChange={(e) => setAddressEn(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>ลิงก์ Google Maps</label>
+                <input
+                  type="url"
+                  className="form-control"
+                  placeholder="วางลิงก์จาก Google Maps → แชร์ → คัดลอกลิงก์"
+                  value={mapLink}
+                  onChange={(e) => setMapLink(e.target.value)}
+                />
+                <span className="settings-hint">ปุ่ม “Google Maps” และ “นำทาง” บนหน้าเว็บจะเปิดลิงก์นี้</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            TAB 4: การแจ้งเตือน & บัญชี — how reminders and sign-in really work
+            ==================================================================== */}
+        {activeTab === "staff_notif" && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "20px", alignItems: "start" }}>
+            <div style={{
+                background: "#ffffff",
+                border: "1px solid var(--staff-border)",
+                borderRadius: "14px",
+                padding: "22px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+                boxShadow: "var(--staff-shadow-sm)",
+              }}>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>ข้อความเตือนนัดทาง LINE (อัตโนมัติ)</strong>
+              <ul className="rules-list">
+                <li>
+                  <strong>วันก่อนนัด เวลา 18:00 น.</strong> — “พรุ่งนี้มีนัดของ …”
+                </li>
+                <li>
+                  <strong>เช้าวันนัด เวลา 07:00 น.</strong> — “วันนี้มีนัดนะคะ …”
+                </li>
+                <li>ส่งเฉพาะครอบครัวที่จองผ่าน LINE — นัดที่จองทางโทรศัพท์ให้โทรเตือนเอง</li>
+                <li>ทุกครั้งที่จอง เลื่อน หรือยกเลิกผ่าน LINE ครอบครัวได้รับข้อความยืนยันทันที</li>
+              </ul>
+            </div>
+
+            <div style={{
+                background: "#ffffff",
+                border: "1px solid var(--staff-border)",
+                borderRadius: "14px",
+                padding: "22px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+                boxShadow: "var(--staff-shadow-sm)",
+              }}>
               <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>การเข้าใช้งานแอป</strong>
-              <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6, color: "var(--staff-ink-2)" }}>
-                แอปเจ้าหน้าที่เข้าระบบด้วย PIN ของคลินิกรหัสเดียว ที่ติดมากับตัวติดตั้งแอป ยังไม่มีบัญชีแยกรายคน
-              </p>
-              <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6, color: "var(--staff-ink-2)" }}>
-                เปลี่ยน PIN: แก้ค่า STAFF_PIN บนเซิร์ฟเวอร์ แล้วสร้างตัวติดตั้งแอปใหม่ให้ทุกเครื่อง
-              </p>
+              <ul className="rules-list">
+                <li>
+                  เข้าแอปด้วย <strong>PIN ของคลินิก</strong> — พิมพ์ครั้งแรกที่เปิดแอปในแต่ละเครื่อง เครื่องจะจำไว้
+                </li>
+                <li>เปลี่ยน PIN: แก้ค่า STAFF_PIN บนเซิร์ฟเวอร์ แล้วทุกเครื่องจะต้องพิมพ์ PIN ใหม่</li>
+              </ul>
             </div>
           </div>
         )}
@@ -963,7 +679,8 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
           </div>
         )}
 
-        {/* Global Save Button */}
+        {/* Save — only the groups with something to save */}
+        {activeTab === "booking" || activeTab === "profile" ? (
         <div
           style={{
             display: "flex",
@@ -974,11 +691,12 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
             gap: "12px",
           }}
         >
-          <button type="submit" className="btn-primary-staff" style={{ padding: "9px 22px" }}>
+          <button type="submit" className="btn-primary-staff">
             <IconCheck size={16} />
-            <span>บันทึกการตั้งค่าทั้งหมด</span>
+            <span>บันทึก</span>
           </button>
         </div>
+        ) : null}
       </form>
     </div>
   );

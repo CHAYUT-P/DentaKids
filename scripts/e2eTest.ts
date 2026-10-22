@@ -15,7 +15,7 @@ async function main() {
 
   const actions = await import("../src/server/actions");
   const queries = await import("../src/server/queries");
-  const { todayISO, addDays, weekdayIndex } = await import("../src/lib/dates");
+  const { todayISO, addDays, weekdayIndex, minutesOf } = await import("../src/lib/dates");
 
   const today = todayISO();
   let passed = 0, failed = 0;
@@ -27,7 +27,7 @@ async function main() {
   console.log("\n— 1. Parent books online (new family) —");
   // find a day naree works, next week
   let date = addDays(today, 7);
-  while (![1, 3, 5, 6].includes(weekdayIndex(date))) date = addDays(date, 1);
+  while (![2, 3, 5, 6].includes(weekdayIndex(date))) date = addDays(date, 1);
 
   // pick a slot no leftover run has taken, per dentist availability
   const allSlots = await (await import("../src/server/queries")).slotsForDate(date);
@@ -123,38 +123,44 @@ async function main() {
     const before = (await queries.listTreatmentCatalog()).find((t) => t.key === "whitening")!;
     await actions.staffUpdateTreatment("whitening", { durationMin: 60 });
     ok("whitening now takes 1 hour", (await queries.treatmentDuration("whitening")) === 60);
-    // a dentist who does whitening, on a day they work with 09:30–11:00 free
+    // a dentist who does whitening, on a day with four free half-hours in a
+    // row (whatever their real shift is): a b c d
     const doc = (await queries.listDentists()).find((d) => d.isActive && d.treats.includes("whitening"))!;
     let d3 = addDays(today, 9);
-    const freeRun = async (iso: string) => {
-      const rows = (await queries.slotsForDate(iso)).filter((r) => r.dentistId === doc.id);
-      const free = (t: string) => rows.some((r) => r.time === t && !r.taken);
-      return ["09:30", "10:00", "10:30", "11:00"].every(free);
-    };
-    while (!(await freeRun(d3))) d3 = addDays(d3, 1);
+    let run: string[] = [];
+    for (let k = 0; k < 30 && run.length < 4; k++, d3 = addDays(d3, 1)) {
+      const rows = (await queries.slotsForDate(d3)).filter((r) => r.dentistId === doc.id).sort((x, y) => (x.time < y.time ? -1 : 1));
+      for (let n = 0; n + 3 < rows.length; n++) {
+        const four = rows.slice(n, n + 4);
+        const steps = four.every((r, q) => q === 0 || minutesOf(r.time) - minutesOf(four[q - 1].time) === 30);
+        if (steps && four.every((r) => !r.taken)) { run = four.map((r) => r.time); break; }
+      }
+      if (run.length === 4) break;
+    }
+    const [a, b, c, dd] = run;
     const long = await actions.bookAppointment({
-      date: d3, time: "10:00", treatmentKey: "whitening", dentistId: doc.id,
+      date: d3, time: b, treatmentKey: "whitening", dentistId: doc.id,
       childName: "ฟอกสีทดสอบ", phone: "0922222222", ageGroup: "adult", lineIdToken: FAMILY,
     });
-    ok("1-hour booking at 10:00 accepted", long.ok, JSON.stringify(long));
+    ok(`1-hour booking at ${b} accepted`, long.ok, JSON.stringify(long));
     const grid = (await queries.slotsForDate(d3)).filter((r) => r.dentistId === doc.id);
-    ok("10:00 and 10:30 both taken", ["10:00", "10:30"].every((t) => grid.find((r) => r.time === t)?.taken));
-    ok("11:00 still free", grid.find((r) => r.time === "11:00")?.taken === false);
-    const at1030 = await actions.bookAppointment({
-      date: d3, time: "10:30", treatmentKey: "checkup", dentistId: doc.id,
+    ok(`${b} and ${c} both taken`, [b, c].every((t) => grid.find((r) => r.time === t)?.taken));
+    ok(`${dd} still free`, grid.find((r) => r.time === dd)?.taken === false);
+    const second = await actions.bookAppointment({
+      date: d3, time: c, treatmentKey: "checkup", dentistId: doc.id,
       childName: "ชนครึ่งหลัง", phone: "0933333333", lineIdToken: FAMILY,
     });
-    ok("10:30 refused (inside the 1-hour booking)", !at1030.ok);
-    const at0930 = await actions.bookAppointment({
-      date: d3, time: "09:30", treatmentKey: "whitening", dentistId: doc.id,
+    ok(`${c} refused (inside the 1-hour booking)`, !second.ok);
+    const before1h = await actions.bookAppointment({
+      date: d3, time: a, treatmentKey: "whitening", dentistId: doc.id,
       childName: "ชนครึ่งแรก", phone: "0944444444", ageGroup: "adult", lineIdToken: FAMILY,
     });
-    ok("1-hour at 09:30 refused (runs into 10:00)", !at0930.ok);
-    const row = (await queries.listAppointmentsBetween(d3, d3)).find((a) => a.ref === long.ref);
+    ok(`1-hour at ${a} refused (runs into ${b})`, !before1h.ok);
+    const row = (await queries.listAppointmentsBetween(d3, d3)).find((x) => x.ref === long.ref);
     ok("booking stored as 60 minutes", row?.durationMin === 60);
     if (long.ok) await actions.cancelBooking(long.ref!, FAMILY);
     const freed = (await queries.slotsForDate(d3)).filter((r) => r.dentistId === doc.id);
-    ok("cancelling frees both half-hours", ["10:00", "10:30"].every((t) => freed.find((r) => r.time === t)?.taken === false));
+    ok("cancelling frees both half-hours", [b, c].every((t) => freed.find((r) => r.time === t)?.taken === false));
     await actions.staffUpdateTreatment("whitening", { durationMin: before.durationMin }); // restore
   }
 

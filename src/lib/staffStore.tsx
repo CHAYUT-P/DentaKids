@@ -32,6 +32,7 @@ import {
   staffSetWaitlistStatus,
   staffUpdateAppointment,
   staffUpdateChairs,
+  staffUpdateClinicInfo,
   staffUpdateDay,
   staffUpdateDentist,
   staffUpdatePatient,
@@ -117,6 +118,9 @@ export interface StaffContextType {
   /** booking-rules knobs (chairs caps one wall-clock slot) */
   settings: { chairs: number };
   updateChairs: (chairs: number) => void;
+  /** the clinic's saved contact details (phone, LINE, address, map) */
+  clinicInfo: StaffBootstrap["clinicInfo"];
+  updateClinicInfo: (patch: Parameters<typeof staffUpdateClinicInfo>[0]) => void;
   /** hand a pooled ("any dentist") booking to a dentist */
   assignDentist: (id: string, dentistSlug: string) => void;
   // Actions — same names the UI already calls; each writes to Postgres
@@ -701,6 +705,13 @@ export function StaffProvider({
     [mutate],
   );
 
+  const updateClinicInfo = useCallback(
+    (patch: Parameters<typeof staffUpdateClinicInfo>[0]) => {
+      void mutate("บันทึกข้อมูลคลินิก", () => staffUpdateClinicInfo(patch));
+    },
+    [mutate],
+  );
+
   const updateChairs = useCallback(
     (chairs: number) => {
       const n = Number.isFinite(chairs) && chairs > 0 ? Math.floor(chairs) : 3;
@@ -762,6 +773,8 @@ export function StaffProvider({
       holidays: state.holidays,
       settings: state.settings ?? { chairs: 3 },
       updateChairs,
+      clinicInfo: state.clinicInfo ?? null,
+      updateClinicInfo,
       assignDentist,
       createAppointment,
       updateAppointment,
@@ -811,7 +824,7 @@ export function StaffProvider({
       deleteAppointment, updateDentist, createDentist, createPatient, updatePatient, addPatientChild,
       addWaitlist, updateWaitlistStatus, assignWaitingDentist, removeWaitlist, updateServicePrice, createTreatment, updateTreatment, setAllShowPrice, addDentistLeave, removeDentistLeave, onLeave,
       saveVisitRecord, finishVisit, refresh,
-      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, assignDentist,
+      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateClinicInfo, assignDentist,
       markAllNotificationsRead, simulateOnlineBooking,
     ],
   );

@@ -27,8 +27,6 @@ import {
 } from "../src/db/schema";
 import {
   addDays,
-  addMonths,
-  monthStart,
   todayISO,
   weekday,
 } from "../src/lib/dates";
@@ -211,12 +209,38 @@ async function main() {
   check("price update lands in DB", fluoride?.price === 999);
   await updateTreatmentPrice("fluoride", 600); // restore
 
+  // open Sunday and give one dentist a Sunday shift, then put both back as
+  // they were — the test must never change the clinic's real hours
+  const sunBefore = (await listClinicDays()).find((d) => d.day === "sun");
   await updateClinicDay("sun", { isOpen: true, start: "10:00", end: "12:00" });
   const sun = (await listClinicDays()).find((d) => d.day === "sun");
   check("clinic day update lands in DB", sun?.isOpen === true);
-  const sunSlots = await slotsForDate(addDays(monthStart(addMonths(today, 1)), 7)); // some future Sunday
+  const { dentistShift } = await import("../src/db/schema");
+  const { and: andOp, eq: eqOp } = await import("drizzle-orm");
+  const [anyDentist] = await db.select({ id: dentist.id }).from(dentist).limit(1);
+  const [shiftBefore] = await db
+    .select()
+    .from(dentistShift)
+    .where(andOp(eqOp(dentistShift.dentistId, anyDentist.id), eqOp(dentistShift.weekday, 0)));
+  await db
+    .insert(dentistShift)
+    .values({ dentistId: anyDentist.id, weekday: 0, enabled: true, start: "10:00", end: "12:00" })
+    .onConflictDoUpdate({ target: [dentistShift.dentistId, dentistShift.weekday], set: { enabled: true, start: "10:00", end: "12:00" } });
+  let sunday = addDays(today, 1);
+  while (weekday(sunday) !== "sun") sunday = addDays(sunday, 1);
+  const sunSlots = await slotsForDate(sunday);
   check("opened Sunday produces bookable slots", sunSlots.length > 0);
-  await updateClinicDay("sun", { isOpen: false, start: "09:00", end: "18:00" }); // restore
+  if (shiftBefore) {
+    await db
+      .update(dentistShift)
+      .set({ enabled: shiftBefore.enabled, start: shiftBefore.start, end: shiftBefore.end })
+      .where(eqOp(dentistShift.id, shiftBefore.id));
+  } else {
+    await db.delete(dentistShift).where(andOp(eqOp(dentistShift.dentistId, anyDentist.id), eqOp(dentistShift.weekday, 0)));
+  }
+  if (sunBefore) {
+    await updateClinicDay("sun", { isOpen: sunBefore.isOpen, start: sunBefore.start, end: sunBefore.end }); // restore
+  }
 
   // waitlist round-trip
   const { addWaitlist, listWaitlist, updateWaitlistStatus, removeWaitlist } =

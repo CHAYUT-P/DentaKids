@@ -4,8 +4,8 @@ import React, { useState } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
 import { useT } from "@/i18n/lang";
-import { fmtLong, thaiDate } from "@/lib/dates";
-import { timeRange } from "@/lib/slots";
+import { fmtLong, thaiDate, weekdayIndex } from "@/lib/dates";
+import { dentistDayTimes, timeRange } from "@/lib/slots";
 import {
   IconX,
   IconCheck,
@@ -238,11 +238,13 @@ export function AppointmentDetailModal({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const times = [
-    "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-    "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-    "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00"
-  ];
+  // the new dentist's hours on the new day, room left for the whole treatment
+  const shiftTimes = dentistDayTimes(
+    dentists.find((d) => d.slug === newDentist)?.shifts,
+    weekdayIndex(newDate),
+    appointment.durationMin,
+  );
+  const times = shiftTimes.includes(newTime) ? shiftTimes : [...shiftTimes, newTime].sort();
 
   return (
     <div className="modal-overlay" onClick={onClose}>

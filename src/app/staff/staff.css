@@ -7322,3 +7322,8 @@ button.status-pill {
 .df-quick:hover:not(:disabled) { background: var(--staff-primary-light); border-color: var(--staff-primary); }
 .df-quick:disabled { opacity: 0.4; cursor: default; }
 .df-quick.clear { flex: 0 0 auto; padding: 0 16px; color: #c92a2a; }
+
+/* settings: plain-language notes and the "how it works" lists */
+.settings-hint { font-size: 13px; color: var(--staff-ink-muted); line-height: 1.5; }
+.rules-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 14.5px; line-height: 1.6; color: var(--staff-ink-2); }
+.rules-list strong { color: var(--staff-ink); font-weight: 600; }

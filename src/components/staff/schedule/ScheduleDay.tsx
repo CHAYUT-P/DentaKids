@@ -5,7 +5,7 @@ import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
 import { addDays, weekday, daysFrom, fmtLong, thaiDate } from "@/lib/dates";
 import { canTreat } from "@/lib/convert";
-import { coveredTimes, endTime, slotsNeeded, timeRange } from "@/lib/slots";
+import { coveredTimes, endTime, gridTimes, slotsNeeded, timeRange } from "@/lib/slots";
 import { useT } from "@/i18n/lang";
 import { BookingModal } from "@/components/staff/schedule/BookingModal";
 import { AppointmentDetailModal } from "@/components/staff/schedule/AppointmentDetailModal";
@@ -24,11 +24,6 @@ import {
 import { AgeTag } from "@/components/staff/shell/AgeTag";
 import { CallFamilyNotice } from "@/components/staff/shell/CallFamilyNotice";
 
-const TIME_SLOTS = [
-  "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-  "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-  "16:00", "16:30", "17:00", "17:30", "18:00"
-];
 
 /** HH:MM → minutes, to spot the gap the clinic leaves for lunch */
 const toMin = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
@@ -110,6 +105,26 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
     const onDuty = active.filter((d) => isDentistWorking(d) || holds(d.slug));
     return onDuty.length > 0 ? onDuty : active;
   }, [dentists, showOnlyOnDuty, isDentistWorking, dayAppts]);
+
+  /**
+   * The rows of the board: from the earliest dentist on duty to the last one
+   * leaving that day (the real shifts, not a fixed 09:00–18:00), widened to
+   * any booking that sits outside them so nothing is ever hidden.
+   */
+  const timeSlots = useMemo(() => {
+    const spans = displayedDentists
+      .map((d) => d.shifts?.find((s) => s.weekday === weekdayNum && s.enabled))
+      .filter((s): s is NonNullable<typeof s> => !!s);
+    let from = spans.length ? Math.min(...spans.map((s) => toMin(s.start))) : 9 * 60;
+    let to = spans.length ? Math.max(...spans.map((s) => toMin(s.end))) : 18 * 60;
+    for (const a of dayAppts) {
+      if (a.status === "cancelled") continue;
+      from = Math.min(from, toMin(a.time));
+      to = Math.max(to, toMin(a.time) + slotsNeeded(a.durationMin) * 30);
+    }
+    const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    return gridTimes(hhmm(from), hhmm(to));
+  }, [displayedDentists, weekdayNum, dayAppts]);
 
   /** live bookings per day — what the date picker draws under each day number */
   const apptCounts = useMemo(() => {
@@ -430,14 +445,8 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
 
           {/* Time Slot Rows */}
           <div className="matrix-body-scroll">
-            {TIME_SLOTS.map((time, i) => (
+            {timeSlots.map((time) => (
               <React.Fragment key={time}>
-              {i > 0 && toMin(time) - toMin(TIME_SLOTS.at(i - 1) ?? time) > 30 ? (
-                <div className="matrix-break-row" aria-label="พักเที่ยง">
-                  <div className="matrix-time-label" />
-                  <div className="matrix-break">พักเที่ยง</div>
-                </div>
-              ) : null}
               <div className="matrix-slot-row">
                 {/* Time Axis Column */}
                 <div className="matrix-time-label">

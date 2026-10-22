@@ -44,3 +44,26 @@ export function durationTh(durationMin: number | null | undefined): string {
   if (h === 0) return `${r} นาที`;
   return r ? `${h} ชม. ${r} นาที` : `${h} ชม.`;
 }
+
+/** every grid start time from `start` up to (not including) `end`: 10:30–12:00 → 10:30, 11:00, 11:30 */
+export function gridTimes(start: string, end: string): string[] {
+  const out: string[] = [];
+  for (let m = toMin(start); m + SLOT_MIN <= toMin(end); m += SLOT_MIN) out.push(toHHMM(m));
+  return out;
+}
+
+/**
+ * The start times a dentist can be booked on one day — their shift that
+ * weekday, leaving room for the whole treatment (a 1-hour one can't start
+ * in the last half-hour). Empty when they don't work that day.
+ */
+export function dentistDayTimes(
+  shifts: { weekday: number; enabled: boolean; start: string; end: string }[] | undefined,
+  weekday: number,
+  durationMin = SLOT_MIN,
+): string[] {
+  const s = shifts?.find((x) => x.weekday === weekday && x.enabled);
+  if (!s) return [];
+  const lastStart = toMin(s.end) - slotsNeeded(durationMin) * SLOT_MIN;
+  return gridTimes(s.start, s.end).filter((t) => toMin(t) <= lastStart);
+}

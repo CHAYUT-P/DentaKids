@@ -1427,12 +1427,13 @@ export async function staffBootstrap() {
     getChairs,
     listTreatmentCatalog,
     listDentistLeaves,
+    getClinicInfo,
   } = await import("@/server/queries");
 
   const today = (await import("@/lib/dates")).todayISO();
 
   const lineUnread = await (await import("@/server/chat")).unreadCount().catch(() => 0);
-  const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves] =
+  const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves, clinicInfo] =
     await Promise.all([
       listAppointmentsBetween("1970-01-01", "9999-12-31"),
       listDentists(),
@@ -1446,6 +1447,7 @@ export async function staffBootstrap() {
       getChairs(),
       listTreatmentCatalog(),
       listDentistLeaves(),
+      getClinicInfo(),
     ]);
 
   return {
@@ -1462,6 +1464,8 @@ export async function staffBootstrap() {
     treatments,
     dentistLeaves,
     settings: { chairs },
+    /** the clinic's saved contact details — the settings form starts from these */
+    clinicInfo,
     /** unanswered LINE messages — the full edition's แชท LINE badge */
     lineUnread,
   };
