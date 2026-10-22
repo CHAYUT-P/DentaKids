@@ -6,7 +6,8 @@
 
 const tlv = (id: string, value: string) => `${id}${String(value.length).padStart(2, "0")}${value}`;
 
-function crc16(s: string): string {
+/** CRC-16/CCITT-FALSE, the checksum Thai QR codes end with */
+export function crc16(s: string): string {
   let crc = 0xffff;
   for (let i = 0; i < s.length; i++) {
     crc ^= s.charCodeAt(i) << 8;

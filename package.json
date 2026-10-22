@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "e2e:test": "tsx --import ./scripts/shimServerOnly.ts scripts/e2eTest.ts",
     "deploy:vps": "bash scripts/deploy-vps.sh",
-    "concurrency:test": "tsx --import ./scripts/shimServerOnly.ts scripts/concurrencyTest.ts"
+    "concurrency:test": "tsx --import ./scripts/shimServerOnly.ts scripts/concurrencyTest.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@line/liff": "2.31.0",

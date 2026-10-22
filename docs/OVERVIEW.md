@@ -117,10 +117,12 @@ docs/                     this file, design notes (docs/design/), deployment gui
 | `pnpm e2e:test` | The whole booking flow end to end: book, see, staff assign, double-booking refused, kids/adults rules, 1-hour treatments, cancel | 38 checks |
 | `pnpm db:test` | Database behaviour: seed, slots, holidays, holds, queue, walk-ins | 28 checks |
 | `pnpm concurrency:test` | 30 simultaneous bookings and payments: no double booking, no overpayment, retries are safe | 15 checks |
+| `pnpm test` | Unit tests: billing maths, Thai baht text, PromptPay QR, slots, age rules | 16 tests |
 | `pnpm typecheck`, `pnpm lint` | Types and lint across the website, backend and desktop app | — |
 
-All of them run against the **local** database (`docker compose up -d`). The
-concurrency test refuses to run anywhere else.
+The database tests run against the **local** database (`docker compose up -d`).
+The concurrency test refuses to run anywhere else. **All of it runs
+automatically on GitHub for every push** ([design/02](design/02-ci.md)).
 
 ## 7. Running it
 
@@ -143,7 +145,7 @@ the `.exe` from Releases on each PC.
 | Step | Status | Note |
 |---|---|---|
 | 1. No double booking / no double charge (locks + idempotency) | ✅ Done | [design/01](design/01-no-double-booking.md) |
-| 2. CI: tests and checks on every push, billing-math unit tests | ⏳ Next | |
+| 2. CI: tests and checks on every push, billing-math unit tests | ✅ Done | [design/02](design/02-ci.md) |
 | 3. Monitoring: error tracking + uptime alerts | ⏳ | |
 | 4. Live updates instead of 20-second polling (each poll currently downloads all data) | ⏳ | Measure requests and bytes before/after |
 | 5. HTTP load test (k6) against a deployed copy | ⏳ | |

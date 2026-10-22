@@ -1,0 +1,90 @@
+# Every push and pull request: the same checks a careful developer would run,
+# so nothing broken reaches the clinic. See docs/design/02-ci.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Types, lint, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck (website + backend)
+        run: pnpm typecheck
+      - name: Typecheck (staff desktop app)
+        run: pnpm --dir apps/staff-desktop typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Unit tests (billing maths, Thai baht text, PromptPay, slots)
+        run: pnpm test
+
+  integration:
+    name: Database tests (booking flow, concurrency)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dentalweb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/dentalweb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create the schema
+        run: pnpm db:push --force
+      - name: Demo data
+        run: pnpm db:seed
+      - name: End-to-end booking flow
+        run: pnpm e2e:test
+      - name: Database behaviour
+        run: pnpm db:test
+      - name: Concurrency (30 simultaneous bookings and payments)
+        run: pnpm concurrency:test
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # the build never connects; it only needs a well-formed address
+      DATABASE_URL: postgres://build:build@localhost:5432/build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
