@@ -10,6 +10,7 @@ import {
   IconCalendar,
 } from "@/components/staff/shell/staffIcons";
 import { RangeCalendar, dayCount, fmtHolidayRange, fmtTHDate } from "@/components/staff/schedule/RangeCalendar";
+import { SystemStatus } from "@/components/staff/settings/SystemStatus";
 
 const DAY_LABELS: Record<DayKey, { th: string; en: string }> = {
   mon: { th: "วันจันทร์", en: "Monday" },
@@ -540,6 +541,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
             ==================================================================== */}
         {activeTab === "staff_notif" && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "20px", alignItems: "start" }}>
+            <SystemStatus />
             <div style={{
                 background: "#ffffff",
                 border: "1px solid var(--staff-border)",

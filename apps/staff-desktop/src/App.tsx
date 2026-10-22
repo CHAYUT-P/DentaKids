@@ -6,6 +6,10 @@ import { LoginScreen } from "./components/LoginScreen";
 import { StaffSidebar } from "./components/StaffSidebar";
 import { API_BASE, ensureStaffToken, hasStaffToken, staffBootstrap, type StaffBootstrap } from "./api";
 import { STAFF_EDITION } from "./edition";
+import { installErrorReporter } from "@/lib/clientErrors";
+
+// crashes in this app go to the same error log and alerts as the server's
+installErrorReporter(`${API_BASE}/api/client-error`, "staff-app");
 
 import { DeviceGate } from "@/components/staff/shell/DeviceGate";
 import { CashierView } from "@/components/staff/billing/CashierView";

@@ -639,3 +639,8 @@ export function staffRemoveHoliday(id: number) {
 export function staffMarkNotificationsRead() {
   return call<void>("markNotificationsRead");
 }
+
+/** the latest errors the system recorded — the สถานะระบบ card */
+export function staffSystemStatus() {
+  return call<{ source: string; message: string; where: string; count: number; lastSeen: string }[]>("systemStatus");
+}

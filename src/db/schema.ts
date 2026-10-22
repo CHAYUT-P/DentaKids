@@ -462,6 +462,33 @@ export const rateLimit = pgTable("rate_limit", {
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 });
 
+/**
+ * Errors the system hit, one row per kind of error (the fingerprint) with a
+ * counter, so a crash that repeats 500 times is one line, not 500. Written by
+ * src/server/monitor.ts from the server, the staff API and both apps.
+ */
+export const errorEvent = pgTable(
+  "error_event",
+  {
+    id: serial("id").primaryKey(),
+    /** hash of where + what (numbers blurred), so the same error groups together */
+    fingerprint: text("fingerprint").notNull(),
+    /** "server" | "staff-api" | "patient-web" | "staff-app" */
+    source: text("source").notNull(),
+    message: text("message").notNull(),
+    /** the route or screen it happened on */
+    where: text("where").notNull().default(""),
+    /** stack trace, trimmed */
+    detail: text("detail").notNull().default(""),
+    count: integer("count").notNull().default(1),
+    firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+    /** when the LINE alert last went out for it — at most hourly per error */
+    alertedAt: timestamp("alerted_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("error_event_fingerprint_idx").on(t.fingerprint), index("error_event_last_seen_idx").on(t.lastSeen)],
+);
+
 /** walk-in queue board (waiting → in_chair → done) */
 export const waitlistEntry = pgTable("waitlist_entry", {
   id: serial("id").primaryKey(),

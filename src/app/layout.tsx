@@ -4,6 +4,7 @@ import { LangProvider } from "@/i18n/lang";
 import "./globals.css";
 import "./home.css";
 import "./pages.css";
+import { ErrorReporter } from "@/components/shared/ErrorReporter";
 
 const display = Mitr({
   variable: "--font-display",
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="th" className={`${display.variable} ${body.variable} ${child.variable}`}>
       <body>
         <LangProvider>{children}</LangProvider>
+        <ErrorReporter />
       </body>
     </html>
   );

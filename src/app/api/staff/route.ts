@@ -108,6 +108,7 @@ const OPS: Record<string, (...args: never[]) => Promise<unknown>> = {
   addHoliday: actions.staffAddHoliday,
   removeHoliday: actions.staffRemoveHoliday,
   markNotificationsRead: actions.staffMarkNotificationsRead,
+  systemStatus: actions.staffSystemStatus,
 };
 
 const CORS = {
@@ -143,6 +144,8 @@ export async function POST(req: NextRequest) {
     const result = await withStaffToken(() => fn(...(body.args ?? []) as never[]), userToken);
     return NextResponse.json({ ok: true, result }, { headers: CORS });
   } catch (e) {
+    const { reportError } = await import("@/server/monitor");
+    await reportError("staff-api", e, `action ${body.action}`);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "internal" },
       { status: 500, headers: CORS },

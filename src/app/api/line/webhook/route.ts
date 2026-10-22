@@ -48,6 +48,11 @@ export async function POST(request: NextRequest) {
 
   for (const ev of events) {
     await keep(ev);
+    // "myid" → your own LINE user id, for ALERT_LINE_USER_ID (error alerts)
+    if (ev.type === "message" && ev.replyToken && ev.message?.text?.trim().toLowerCase() === "myid" && ev.source?.userId) {
+      await replyLineText(ev.replyToken, `LINE user id ของคุณ:\n${ev.source.userId}`);
+      continue;
+    }
     if (ev.type === "follow" && ev.replyToken) {
       // replies are free (push messages are not) — greet every new friend
       await replyLineText(

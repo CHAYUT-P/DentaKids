@@ -1496,3 +1496,11 @@ export async function staffBootstrap() {
 
 export type StaffBootstrap = Awaited<ReturnType<typeof staffBootstrap>>;
 
+/** the สถานะระบบ card: the latest errors the system recorded (src/server/monitor.ts) */
+export async function staffSystemStatus() {
+  await guard();
+  const { recentErrors } = await import("@/server/monitor");
+  const rows = await recentErrors(10);
+  return rows.map((r) => ({ ...r, lastSeen: r.lastSeen.toISOString() }));
+}
+

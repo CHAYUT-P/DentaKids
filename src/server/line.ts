@@ -91,6 +91,12 @@ export async function pushLineText(toUserId: string, text: string, from = "ร�
   return ok;
 }
 
+/** an operations alert to the developer's own LINE — not a patient message,
+ *  so it is not recorded in the clinic's chat inbox */
+export async function pushLineAlert(toUserId: string, text: string): Promise<boolean> {
+  return postLine(LINE_PUSH_URL, { to: toUserId, messages: [{ type: "text", text: text.slice(0, 2000) }] });
+}
+
 /** reply inside the webhook window — free, but the token dies in ~1 minute */
 export async function replyLineText(replyToken: string, text: string): Promise<boolean> {
   return postLine(LINE_REPLY_URL, { replyToken, messages: [{ type: "text", text }] });

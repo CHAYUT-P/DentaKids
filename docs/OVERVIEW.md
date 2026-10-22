@@ -146,7 +146,7 @@ the `.exe` from Releases on each PC.
 |---|---|---|
 | 1. No double booking / no double charge (locks + idempotency) | ✅ Done | [design/01](design/01-no-double-booking.md) |
 | 2. CI: tests and checks on every push, billing-math unit tests | ✅ Done | [design/02](design/02-ci.md) |
-| 3. Monitoring: error tracking + uptime alerts | ⏳ | |
+| 3. Monitoring: error tracking + uptime alerts | ✅ Done | [design/03](design/03-monitoring.md). Owner setup: `ALERT_LINE_USER_ID` + UptimeRobot |
 | 4. Live updates instead of 20-second polling (each poll currently downloads all data) | ⏳ | Measure requests and bytes before/after |
 | 5. HTTP load test (k6) against a deployed copy | ⏳ | |
 
