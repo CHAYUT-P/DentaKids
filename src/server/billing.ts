@@ -51,10 +51,14 @@ import type { VisitItem } from "@/lib/staffTypes";
 const METHODS: PayMethod[] = ["cash", "transfer", "promptpay", "card", "other", "credit", "sso", "nhso", "insurance"];
 const int = (n: unknown) => Math.max(0, Math.round(Number(n) || 0));
 
+/** what a query runs on: the shared pool, or a transaction's own connection —
+ *  code holding a lock reads through its transaction, never the pool */
+type Q = Pick<typeof db, "select">;
+
 /* ── lookups ───────────────────────────────────────────────────────────── */
 
-async function dentistMaps() {
-  const rows = await db.select({ id: dentist.id, slug: dentist.slug }).from(dentist);
+async function dentistMaps(q: Q = db) {
+  const rows = await q.select({ id: dentist.id, slug: dentist.slug }).from(dentist);
   return {
     toSlug: new Map(rows.map((r) => [r.id, r.slug])),
     toId: new Map(rows.map((r) => [r.slug, r.id])),
@@ -193,13 +197,13 @@ export async function removeDfRule(id: number): Promise<void> {
  * What a patient has used of their cover: ประกันสังคม baht this calendar
  * year, บัตรทอง visits this fiscal year (Oct–Sep). Voided bills don't count.
  */
-async function coverageUsage(childIds: number[]): Promise<Map<number, { sso: number; nhsoVisits: number }>> {
+async function coverageUsage(childIds: number[], q: Q = db): Promise<Map<number, { sso: number; nhsoVisits: number }>> {
   const out = new Map<number, { sso: number; nhsoVisits: number }>();
   if (!childIds.length) return out;
   const today = todayISO();
   const year = today.slice(0, 4);
   const fyStart = today.slice(5) >= "10-01" ? `${year}-10-01` : `${Number(year) - 1}-10-01`;
-  const rows = await db
+  const rows = await q
     .select({ childId: invoice.childId, invoiceId: invoice.id, method: payment.method, amount: payment.amount, date: payment.date })
     .from(payment)
     .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
@@ -214,20 +218,21 @@ async function coverageUsage(childIds: number[]): Promise<Map<number, { sso: num
   return out;
 }
 
-export async function billsWhere(where: SQL): Promise<Bill[]> {
-  const { toSlug } = await dentistMaps();
-  const heads = await db.select().from(invoice).where(where).orderBy(asc(invoice.createdAt));
+/** `q`: pass a transaction to read inside it (see addPayment) — never the pool while holding a lock */
+export async function billsWhere(where: SQL, q: Q = db): Promise<Bill[]> {
+  const { toSlug } = await dentistMaps(q);
+  const heads = await q.select().from(invoice).where(where).orderBy(asc(invoice.createdAt));
   if (heads.length === 0) return [];
   const ids = heads.map((h) => h.id);
   const childIds = [...new Set(heads.map((h) => h.childId).filter((x): x is number => x != null))];
   const [items, pays, credits, kids, usage] = await Promise.all([
-    db.select().from(invoiceItem).where(inArray(invoiceItem.invoiceId, ids)).orderBy(asc(invoiceItem.sort), asc(invoiceItem.id)),
-    db.select().from(payment).where(inArray(payment.invoiceId, ids)).orderBy(asc(payment.createdAt)),
+    q.select().from(invoiceItem).where(inArray(invoiceItem.invoiceId, ids)).orderBy(asc(invoiceItem.sort), asc(invoiceItem.id)),
+    q.select().from(payment).where(inArray(payment.invoiceId, ids)).orderBy(asc(payment.createdAt)),
     childIds.length
-      ? db.select({ childId: patientCredit.childId, amount: patientCredit.amount }).from(patientCredit).where(inArray(patientCredit.childId, childIds))
+      ? q.select({ childId: patientCredit.childId, amount: patientCredit.amount }).from(patientCredit).where(inArray(patientCredit.childId, childIds))
       : Promise.resolve([] as { childId: number; amount: number }[]),
-    childIds.length ? db.select({ id: child.id, coverage: child.coverage }).from(child).where(inArray(child.id, childIds)) : Promise.resolve([]),
-    coverageUsage(childIds),
+    childIds.length ? q.select({ id: child.id, coverage: child.coverage }).from(child).where(inArray(child.id, childIds)) : Promise.resolve([]),
+    coverageUsage(childIds, q),
   ]);
   return heads.map((h) => {
     const lines: BillItem[] = items
@@ -289,8 +294,8 @@ export async function billsWhere(where: SQL): Promise<Bill[]> {
   });
 }
 
-export async function getBill(id: number): Promise<Bill | null> {
-  return (await billsWhere(eq(invoice.id, id)))[0] ?? null;
+export async function getBill(id: number, q: Q = db): Promise<Bill | null> {
+  return (await billsWhere(eq(invoice.id, id), q))[0] ?? null;
 }
 
 /** everything the cashier screen shows for one day */
@@ -642,37 +647,67 @@ async function nextReceiptNo(prefix: string, date: string): Promise<string> {
 }
 
 /** take money; the first payment gives the bill its receipt number */
+/**
+ * Take money on a bill. Safe against the two ways a till goes wrong:
+ *
+ *  · a double click, or a retry after the connection dropped — the cashier
+ *    screen sends one `idempotencyKey` per payment, and a key already used
+ *    gets the first payment back instead of a second one
+ *  · two counters on the same bill (or the same patient's deposit) at once —
+ *    a lock per bill and per patient's deposit makes "is this more than is
+ *    owed / more deposit than they have?" and "record it" one step
+ */
 export async function addPayment(
   id: number,
-  input: { method: PayMethod; amount: number; note?: string },
-): Promise<{ ok: boolean; receiptNo?: string }> {
+  input: { method: PayMethod; amount: number; note?: string; idempotencyKey?: string },
+): Promise<{ ok: boolean; receiptNo?: string; replayed?: boolean }> {
   const head = (await db.select().from(invoice).where(eq(invoice.id, id)))[0];
   const amount = int(input.amount);
   if (!head || head.status === "void" || amount <= 0) return { ok: false };
   const method = METHODS.includes(input.method) ? input.method : "other";
   const today = todayISO();
+  const key = input.idempotencyKey || null;
 
-  // never more than is owed — a settled bill takes no more money
-  const current = await getBill(id);
-  if (!current || amount > current.balance) return { ok: false };
+  const outcome = await db.transaction(async (tx): Promise<"ok" | "replayed" | "refused"> => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pay:${id}`}))`);
+    if (key) {
+      const seen = await tx.select({ id: payment.id }).from(payment).where(eq(payment.idempotencyKey, key));
+      if (seen.length) return "replayed";
+    }
 
-  // spending a deposit: only what the patient has, only on their own bill
-  if (method === "credit") {
-    if (!head.childId) return { ok: false };
-    const { creditBalance } = await import("@/server/clinical");
-    if ((await creditBalance(head.childId)) < amount) return { ok: false };
-    await db.insert(patientCredit).values({ childId: head.childId, amount: -amount, invoiceId: id, note: "ใช้มัดจำ" });
-  }
+    // never more than is owed — a settled bill takes no more money (read
+    // after the lock, so a payment that just landed is counted)
+    const current = await getBill(id, tx);
+    if (!current || current.status === "void" || amount > current.balance) return "refused";
 
-  await db.insert(payment).values({
-    invoiceId: id,
-    method,
-    amount,
-    date: today,
-    note: String(input.note ?? "").slice(0, 120),
-    // paid by a fund or insurer: the clinic still has to file for it
-    claimStatus: isClaim(method) ? "pending" : "",
+    // spending a deposit: only what the patient has, only on their own bill —
+    // locked per patient, since two bills can draw on one deposit
+    if (method === "credit") {
+      if (!head.childId) return "refused";
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`credit:${head.childId}`}))`);
+      const { creditBalance } = await import("@/server/clinical");
+      if ((await creditBalance(head.childId, tx)) < amount) return "refused";
+      await tx.insert(patientCredit).values({ childId: head.childId, amount: -amount, invoiceId: id, note: "ใช้มัดจำ" });
+    }
+
+    await tx.insert(payment).values({
+      invoiceId: id,
+      method,
+      amount,
+      date: today,
+      note: String(input.note ?? "").slice(0, 120),
+      // paid by a fund or insurer: the clinic still has to file for it
+      claimStatus: isClaim(method) ? "pending" : "",
+      idempotencyKey: key,
+    });
+    return "ok";
   });
+
+  if (outcome === "refused") return { ok: false };
+  if (outcome === "replayed") {
+    const again = (await db.select({ receiptNo: invoice.receiptNo }).from(invoice).where(eq(invoice.id, id)))[0];
+    return { ok: true, receiptNo: again?.receiptNo ?? undefined, replayed: true };
+  }
 
   let receiptNo = head.receiptNo;
   if (!receiptNo) {

@@ -124,7 +124,11 @@ export interface StaffContextType {
   /** hand a pooled ("any dentist") booking to a dentist */
   assignDentist: (id: string, dentistSlug: string) => void;
   // Actions — same names the UI already calls; each writes to Postgres
-  createAppointment: (data: Omit<StaffAppointment, "id" | "ref" | "createdAt" | "dentistId">) => StaffAppointment;
+  createAppointment: (
+    data: Omit<StaffAppointment, "id" | "ref" | "createdAt" | "dentistId">,
+    /** one key per "new appointment" window — a double click saves once */
+    opts?: { idempotencyKey?: string },
+  ) => StaffAppointment;
   updateAppointment: (id: string, updates: Partial<StaffAppointment>) => void;
   updateStatus: (id: string, status: AppointmentStatus) => void;
   /** queue transitions — check-in stamps the clinic clock server-side */
@@ -304,7 +308,10 @@ export function StaffProvider({
   /* ── appointments ──────────────────────────────────────────────────────── */
 
   const createAppointment = useCallback(
-    (data: Omit<StaffAppointment, "id" | "ref" | "createdAt" | "dentistId">): StaffAppointment => {
+    (
+      data: Omit<StaffAppointment, "id" | "ref" | "createdAt" | "dentistId">,
+      opts?: { idempotencyKey?: string },
+    ): StaffAppointment => {
       // optimistic shell so the modal can close at once; the real row lands
       // with the refresh a moment later (ref may differ if of a race)
       const optimistic: StaffAppointment = {
@@ -326,6 +333,7 @@ export function StaffProvider({
           source: data.source,
           note: data.notes,
           price: data.price ?? null,
+          idempotencyKey: opts?.idempotencyKey,
         });
         // null = the slot (or part of a longer treatment's time) was taken
         if (!ref) throw new Error("slot_taken");

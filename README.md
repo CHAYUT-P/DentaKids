@@ -38,9 +38,12 @@ docker compose up -d          # local database
 pnpm dev                      # website + backend on http://localhost:3000
 pnpm db:push                  # apply schema changes to the database in .env
 pnpm e2e:test                 # booking flow end to end
+pnpm concurrency:test         # 30 simultaneous bookings/payments: no doubles
 pnpm --dir apps/staff-desktop dev:app:full   # staff app (full edition) against :3000
 pnpm deploy:vps root@<ip>     # deploy / update the VPS (see docs/DEPLOYMENT.md)
 ```
 
-More detail: [docs/PROJECT.md](docs/PROJECT.md) (how the system works) and
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (hosting).
+**New here? Start with [docs/OVERVIEW.md](docs/OVERVIEW.md)**: what the system is,
+where the code lives, and why it's built this way. Design notes with measured
+results are in [docs/design/](docs/design/). More: [docs/PROJECT.md](docs/PROJECT.md)
+(original plan) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (hosting).

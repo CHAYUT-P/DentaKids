@@ -8,6 +8,7 @@ import { useStaff, type BookingSource } from "@/lib/staffStore";
 import type { IconKey } from "@/data/icons";
 import { IconX, IconPlus, IconPhone, IconWalkIn, IconSmartphone } from "@/components/staff/shell/staffIcons";
 import { DateField } from "@/components/staff/shell/DateField";
+import { newIdempotencyKey } from "@/lib/idempotency";
 
 interface BookingModalProps {
   initialDate?: string;
@@ -49,6 +50,8 @@ export function BookingModal({
   const [notes, setNotes] = useState("");
 
   const activeDentists = dentists.filter((d) => d.isActive);
+  /** one key per window: a double click on save books once */
+  const [saveKey] = useState(newIdempotencyKey);
 
   /** a 1-hour treatment holds two half-hours — does either already belong to someone? */
   const durationMin = tr.get(treatmentKey).durationMin;
@@ -90,7 +93,7 @@ export function BookingModal({
       notes: notes.trim(),
       price: tr.get(treatmentKey).price ?? 0,
       forSelf: initialForSelf ?? false,
-    });
+    }, { idempotencyKey: saveKey });
 
     if (onCreated) onCreated();
     onClose();

@@ -13,7 +13,8 @@
     "db:test": "tsx --import ./scripts/shimServerOnly.ts scripts/dbTest.ts",
     "db:studio": "drizzle-kit studio",
     "e2e:test": "tsx --import ./scripts/shimServerOnly.ts scripts/e2eTest.ts",
-    "deploy:vps": "bash scripts/deploy-vps.sh"
+    "deploy:vps": "bash scripts/deploy-vps.sh",
+    "concurrency:test": "tsx --import ./scripts/shimServerOnly.ts scripts/concurrencyTest.ts"
   },
   "dependencies": {
     "@line/liff": "2.31.0",

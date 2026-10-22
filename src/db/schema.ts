@@ -282,6 +282,9 @@ export const appointment = pgTable(
     /** who the booking is for, as the family picked it: "kid" (under 12) or
      *  "adult" — null for bookings made before the question (and by staff) */
     ageGroup: text("age_group"),
+    /** the client's one-per-attempt key: a retried or double-tapped booking
+     *  finds this row instead of making a second one (unique, see below) */
+    idempotencyKey: text("idempotency_key"),
     /**
      * The LINE account that made this booking (verified LIFF `sub`), and its
      * display name at booking time. Online bookings collect only a nickname +
@@ -294,6 +297,7 @@ export const appointment = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    uniqueIndex("appointment_idempotency_idx").on(t.idempotencyKey),
     uniqueIndex("appointment_ref_idx").on(t.ref),
     index("appointment_line_idx").on(t.lineUserId),
     /** the double-booking guard: one dentist, one wall-clock slot — but only
@@ -614,9 +618,16 @@ export const payment = pgTable(
     note: text("note").notNull().default(""),
     /** claim payments (SSO / NHSO / insurer): "pending" | "submitted" | "paid" | "rejected" */
     claimStatus: text("claim_status").notNull().default(""),
+    /** the cashier screen's one-per-payment key: a double-click or a retry
+     *  after a dropped connection records the money once */
+    idempotencyKey: text("idempotency_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("payment_invoice_idx").on(t.invoiceId), index("payment_date_idx").on(t.date)],
+  (t) => [
+    index("payment_invoice_idx").on(t.invoiceId),
+    index("payment_date_idx").on(t.date),
+    uniqueIndex("payment_idempotency_idx").on(t.idempotencyKey),
+  ],
 );
 
 /**

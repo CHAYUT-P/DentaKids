@@ -483,8 +483,8 @@ export async function takeDeposit(input: { childId: number; amount: number; meth
   return bill.id;
 }
 
-export async function creditBalance(childId: number): Promise<number> {
-  const rows = await db.select({ amount: patientCredit.amount }).from(patientCredit).where(eq(patientCredit.childId, childId));
+export async function creditBalance(childId: number, q: Pick<typeof db, "select"> = db): Promise<number> {
+  const rows = await q.select({ amount: patientCredit.amount }).from(patientCredit).where(eq(patientCredit.childId, childId));
   return rows.reduce((s, r) => s + r.amount, 0);
 }
 

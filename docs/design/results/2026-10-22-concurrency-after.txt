@@ -1,0 +1,33 @@
+
+— 1. 30 families, one dentist, one time —
+    (30 at once: 116 ms)
+  ✓ exactly 1 of 30 succeeds
+  ✓ exactly 1 row in the database
+
+— 2. 30 "any dentist" bookings, limited chairs —
+    (30 at once: 116 ms)
+  ✓ exactly 2 of 30 succeed (2 chairs)
+  ✓ never more than 2 in the chairs at 09:00
+
+— 3. 1-hour and 30-minute bookings racing to overlap —
+    (30 mixed at once: 82 ms)
+  ✓ no two bookings share a half-hour
+
+— 4. the same booking sent 30 times at once (one key) —
+    (30 copies: 68 ms)
+  ✓ all 30 answered "booked"
+  ✓ …all with the same booking code
+  ✓ exactly 1 row in the database
+  ✓ a later retry gets the same booking
+
+— 5–7. payments —
+    (30 payments: 64 ms)
+  ✓ 1 of 30 payments goes through
+  ✓ bill paid exactly 1,000 — never more than owed
+  ✓ all 30 clicks answered ok
+  ✓ the money is recorded once
+  ✓ only one bill can spend the deposit
+  ✓ deposit never goes negative
+
+═══ 15 passed, 0 failed ═══
+

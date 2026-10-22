@@ -179,6 +179,7 @@ export function staffCreateAppointment(input: {
   source: "phone" | "walkin" | "online";
   note?: string;
   price?: number | null;
+  idempotencyKey?: string;
 }) {
   return call<string | null>("createAppointment", [input]);
 }
@@ -525,8 +526,11 @@ export function staffSaveBill(id: number, input: { items: BillItem[]; discount: 
   return call<boolean>("saveBill", [id, input]);
 }
 
-export function staffAddPayment(id: number, input: { method: PayMethod; amount: number; note?: string }) {
-  return call<{ ok: boolean; receiptNo?: string }>("addPayment", [id, input]);
+export function staffAddPayment(
+  id: number,
+  input: { method: PayMethod; amount: number; note?: string; idempotencyKey?: string },
+) {
+  return call<{ ok: boolean; receiptNo?: string; replayed?: boolean }>("addPayment", [id, input]);
 }
 
 export function staffVoidBill(id: number, reason: string) {

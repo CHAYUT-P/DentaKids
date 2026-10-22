@@ -31,6 +31,7 @@ import { Mascot } from "@/components/shared/Mascot";
 import { DentistAvatar } from "@/components/patient/portrait";
 import { Cta, Eyebrow, Ghost, LineSignIn, Screen, Slip } from "@/components/patient/screen";
 import { ServiceIcon } from "@/components/shared/serviceIcons";
+import { newIdempotencyKey } from "@/lib/idempotency";
 
 /**
  * Who it's for (kid / adult) → treatment → dentist → day and time → name +
@@ -421,6 +422,9 @@ export function BookingFlow(props: BookingFlowProps) {
   const [contactErr, setContactErr] = useState<string | null>(null);
 
   const [pending, startBooking] = useTransition();
+  /** one key for this booking: if the confirm tap is sent twice, or retried
+   *  after the connection drops, the server returns the same booking */
+  const [bookKey] = useState(newIdempotencyKey);
   const [bookErr, setBookErr] = useState<string | null>(null);
   const [confirmedRef, setConfirmedRef] = useState<string | null>(null);
 
@@ -553,6 +557,7 @@ export function BookingFlow(props: BookingFlowProps) {
         ageGroup: group,
         holdToken: holdToken ?? undefined,
         lineIdToken: line.token ?? undefined,
+        idempotencyKey: bookKey,
       });
       if (result.ok && result.ref) {
         setHoldToken(null);

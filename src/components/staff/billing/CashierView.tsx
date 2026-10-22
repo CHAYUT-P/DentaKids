@@ -61,6 +61,7 @@ import {
   IconX,
 } from "@/components/staff/shell/staffIcons";
 import { DateField } from "@/components/staff/shell/DateField";
+import { newIdempotencyKey } from "@/lib/idempotency";
 
 type PrintTarget = { kind: "receipt"; bill: Bill } | { kind: "close"; close: DayClose };
 
@@ -435,7 +436,7 @@ function BillEditor({
   settings: BillingSettings;
   dentistName: (slug: string | null) => string;
   onSave: (input: { items: BillItem[]; discount: number; note: string; patientName?: string }) => Promise<boolean>;
-  onPay: (input: { method: PayMethod; amount: number; note?: string }) => Promise<boolean>;
+  onPay: (input: { method: PayMethod; amount: number; note?: string; idempotencyKey?: string }) => Promise<boolean>;
   onVoid: (reason: string) => Promise<boolean>;
   onChanged: () => Promise<void>;
   onPrint: (b: Bill) => void;
@@ -454,6 +455,8 @@ function BillEditor({
   const [amount, setAmount] = useState<string>("");
   const [tendered, setTendered] = useState("");
   const [busy, setBusy] = useState(false);
+  /** this payment's idempotency key — see `pay` */
+  const [payKey] = useState(newIdempotencyKey);
   const [voiding, setVoiding] = useState<string | null>(null);
   const [showLab, setShowLab] = useState(bill.items.some((i) => i.labCost > 0));
 
@@ -517,13 +520,16 @@ function BillEditor({
   };
 
   const pay = async () => {
-    if (payAmount <= 0) return;
+    if (payAmount <= 0 || busy) return;
     setBusy(true);
     if (dirty && !(await onSave(draft))) {
       setBusy(false);
       return;
     }
-    const ok = await onPay({ method, amount: payAmount });
+    // the same key until this payment goes through — a double click or a
+    // retry after a dropped connection records the money once (the editor
+    // is rebuilt after each payment, which makes the next key)
+    const ok = await onPay({ method, amount: payAmount, idempotencyKey: payKey });
     await onChanged();
     setBusy(false);
     if (ok) {

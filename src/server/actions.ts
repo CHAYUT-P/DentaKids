@@ -163,6 +163,11 @@ export interface BookResult {
  * dentist works, and either that dentist is free (named) or the chairs aren't
  * full (pool). Active holds count as taken/at-capacity everywhere.
  */
+/** an idempotency key as the pages make them (a UUID) — anything else is ignored */
+function validKey(v: unknown): string | undefined {
+  return typeof v === "string" && /^[A-Za-z0-9-]{8,64}$/.test(v) ? v : undefined;
+}
+
 async function slotVerdict(
   date: string,
   time: string,
@@ -282,7 +287,17 @@ export async function bookAppointment(input: {
   holdToken?: string;
   /** LIFF ID token when the page runs inside LINE — verified server-side */
   lineIdToken?: string;
+  /** one per booking attempt (the page makes it): a retry or a double tap
+   *  with the same key gets the first booking back, never a second one */
+  idempotencyKey?: string;
 }): Promise<BookResult> {
+  // a retry of a booking that already went through: same answer, nothing new
+  // (checked before the rate limit so a flaky connection can't lock a family out)
+  const key = validKey(input.idempotencyKey);
+  const { appointmentByKey } = await import("@/server/queries");
+  const already = await appointmentByKey(key);
+  if (already) return { ok: true, ref: already.ref };
+
   // minimal validation — never trust the client, even ours
   if (await limited("book", 20, 600)) return { ok: false, error: "invalid" };
   const name = typeof input.childName === "string" ? input.childName.trim().slice(0, 60) : "";
@@ -315,6 +330,9 @@ export async function bookAppointment(input: {
 
   const verdict = await slotVerdict(input.date, input.time, input.treatmentKey, dentistId, ageGroup);
   if (verdict !== "ok") {
+    // a twin of this request (same key) may have just taken the slot itself
+    const twin = await appointmentByKey(key);
+    if (twin) return { ok: true, ref: twin.ref };
     // at capacity the pressure valve runs first — the oldest pooled booking
     // takes a remaining free dentist — and the newcomer is turned away either way
     if (dentistId === null && verdict === "slot_taken") {
@@ -340,9 +358,12 @@ export async function bookAppointment(input: {
     lineName: identity?.displayName,
     // nickname + phone only — no guardian/child records from the patient site
     register: false,
+    idempotencyKey: key,
   });
 
   if (!created) return { ok: false, error: "slot_taken" };
+  // the same attempt arrived twice at once — the first one did the work
+  if (created.replayed) return { ok: true, ref: created.ref };
 
   const { settlePool } = await import("@/server/queries");
   await settlePool(input.date, input.time);
@@ -506,10 +527,10 @@ export async function rescheduleBooking(input: {
   const verdict = await slotVerdict(input.date, input.time, target.treatmentKey, target.dentistId, target.ageGroup, target.id);
   if (verdict !== "ok") return { ok: false, error: verdict };
 
-  try {
-    await updateAppointment(target.id, { date: input.date, time: input.time });
-  } catch {
-    // the unique slot index fired — someone took that dentist's slot mid-flight
+  // the room check and the move as one step, under the day lock — the same
+  // guarantee a new booking gets
+  const { moveAppointmentGuarded } = await import("@/server/queries");
+  if (!(await moveAppointmentGuarded(target.id, input.date, input.time))) {
     return { ok: false, error: "slot_taken" };
   }
 
@@ -580,9 +601,11 @@ export async function staffCreateAppointment(input: {
   source: "phone" | "walkin" | "online";
   note?: string;
   price?: number | null;
+  /** one per "new appointment" window — a double click saves once */
+  idempotencyKey?: string;
 }) {
   await guard();
-  const created = await createAppointment({ ...input, source: input.source });
+  const created = await createAppointment({ ...input, source: input.source, idempotencyKey: validKey(input.idempotencyKey) });
   revalidateAll();
   return created?.ref ?? null;
 }
@@ -1195,8 +1218,8 @@ export async function staffSaveBill(id: number, input: Parameters<typeof import(
 export async function staffAddPayment(id: number, input: Parameters<typeof import("@/server/billing").addPayment>[1]) {
   await guard("cashier");
   const { addPayment } = await import("@/server/billing");
-  const r = await addPayment(id, input);
-  if (r.ok) await logAction("รับชำระ", `บิล #${id} · ${input.method} ${input.amount} บาท${r.receiptNo ? ` · ${r.receiptNo}` : ""}`);
+  const r = await addPayment(id, { ...input, idempotencyKey: validKey(input.idempotencyKey) });
+  if (r.ok && !r.replayed) await logAction("รับชำระ", `บิล #${id} · ${input.method} ${input.amount} บาท${r.receiptNo ? ` · ${r.receiptNo}` : ""}`);
   return r;
 }
 

@@ -612,8 +612,8 @@ export async function dateHasRoom(date: string, today: string, nowMin: number): 
  *    the pool waits for the staff to place it by hand.
  */
 
-export async function getChairs(): Promise<number> {
-  const rows = await db.select().from(clinicSetting).where(eq(clinicSetting.key, "chairs"));
+export async function getChairs(q: Pick<typeof db, "select"> = db): Promise<number> {
+  const rows = await q.select().from(clinicSetting).where(eq(clinicSetting.key, "chairs"));
   const n = Number(rows[0]?.value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
 }
@@ -938,6 +938,8 @@ export interface CreateAppointmentInput {
   ageGroup?: AgeGroup | null;
   /** minutes; defaults to the treatment's own length */
   durationMin?: number;
+  /** one per booking attempt — a retry with the same key returns the first booking */
+  idempotencyKey?: string;
   source?: AppointmentSource;
   note?: string;
   price?: number | null;
@@ -974,7 +976,88 @@ async function nextRef(): Promise<string> {
  * double-booking guard; this returns null when the slot was taken mid-flight
  * so the caller can show "slot just filled".
  */
-export async function createAppointment(input: CreateAppointmentInput): Promise<AppointmentDTO | null> {
+/**
+ * Move a booking to a new day/time under the day lock: the room check and the
+ * move are one step, like a new booking. Returns false when, by the time the
+ * lock is ours, the slot (or a chair) has gone.
+ */
+export async function moveAppointmentGuarded(id: number, date: string, time: string): Promise<boolean> {
+  const [row] = await db.select().from(appointment).where(eq(appointment.id, id));
+  if (!row) return false;
+  return db.transaction(async (tx) => {
+    await lockDay(tx, date);
+    if (row.dentistId !== null) {
+      if (await overlapsDentist(row.dentistId, date, time, row.durationMin, id, tx)) return false;
+    } else if (await chairsFull(tx, date, coveredTimes(time, row.durationMin), id)) {
+      return false;
+    }
+    try {
+      await tx.update(appointment).set({ date, time, updatedAt: new Date() }).where(eq(appointment.id, id));
+    } catch {
+      return false; // the unique slot index fired
+    }
+    return true;
+  });
+}
+
+/** a booking already made with this key (a retry or a double tap), as returned the first time */
+export async function appointmentByKey(key: string | undefined): Promise<AppointmentDTO | null> {
+  if (!key) return null;
+  const [row] = await db.select().from(appointment).where(eq(appointment.idempotencyKey, key));
+  if (!row) return null;
+  const d = row.dentistId === null ? { slug: "", name: "" } : await dentistName(row.dentistId);
+  return toAppointmentDTO(row, d.slug, d.name);
+}
+
+/**
+ * Inside a booking transaction: would one more live booking at these times
+ * go over the chairs? Bookings and other families' active holds both sit in
+ * a chair; `excludeId` leaves out a booking that is being moved.
+ */
+async function chairsFull(
+  q: Pick<typeof db, "select">,
+  date: string,
+  times: string[],
+  excludeId?: number,
+): Promise<boolean> {
+  // the transaction's own connection only: asking the shared pool for a
+  // second one while holding the day lock can deadlock under load
+  const chairs = await getChairs(q);
+  const [live, holds] = await Promise.all([
+    q
+      .select({ id: appointment.id, time: appointment.time, durationMin: appointment.durationMin })
+      .from(appointment)
+      .where(and(eq(appointment.date, date), ne(appointment.status, "cancelled"))),
+    q
+      .select({ time: slotHold.time, durationMin: slotHold.durationMin })
+      .from(slotHold)
+      .where(and(eq(slotHold.date, date), gt(slotHold.expiresAt, new Date()))),
+  ]);
+  return times.some((t) => {
+    const inChair =
+      live.filter((r) => r.id !== excludeId && coveredTimes(r.time, r.durationMin).includes(t)).length +
+      holds.filter((h) => coveredTimes(h.time, h.durationMin).includes(t)).length;
+    return inChair >= chairs;
+  });
+}
+
+/**
+ * One lock per clinic day. Every booking on that day — named or "any
+ * dentist" — takes it before its final check, so "is there room?" and
+ * "take it" happen as one step: two families tapping at the same instant are
+ * served one after the other, never both on the last chair.
+ */
+async function lockDay(tx: { execute: typeof db.execute }, date: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`appt-day:${date}`}))`);
+}
+
+export async function createAppointment(
+  input: CreateAppointmentInput,
+): Promise<(AppointmentDTO & { replayed?: boolean }) | null> {
+  // seen this attempt before (a retry, a double tap) → the same booking, nothing new
+  const before = await appointmentByKey(input.idempotencyKey);
+  if (before) return { ...before, replayed: true };
+
   const ref = await nextRef();
 
   // match the family by phone — a first-time caller is registered so the
@@ -1008,12 +1091,23 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
 
   const durationMin = input.durationMin ?? (await treatmentDuration(input.treatmentKey));
 
-  // one booking per dentist at a time per day: the lock makes the overlap
-  // check and the insert one step, so two long bookings can't cross mid-flight
+  // the day lock makes the last check and the insert one step: a named
+  // dentist can't be double-booked (overlap), the pool can't overfill the
+  // chairs, and the same key can't land twice
+  let replayed = false;
   const inserted = await db.transaction(async (tx) => {
+    await lockDay(tx, input.date);
+    if (input.idempotencyKey) {
+      const dup = await tx.select().from(appointment).where(eq(appointment.idempotencyKey, input.idempotencyKey));
+      if (dup.length) {
+        replayed = true;
+        return dup;
+      }
+    }
     if (input.dentistId !== null) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`appt:${input.dentistId}:${input.date}`}))`);
       if (await overlapsDentist(input.dentistId, input.date, input.time, durationMin, undefined, tx)) return [];
+    } else if (await chairsFull(tx, input.date, coveredTimes(input.time, durationMin))) {
+      return [];
     }
     return tx
       .insert(appointment)
@@ -1037,6 +1131,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
         ageGroup: input.ageGroup ?? null,
         lineUserId: input.lineUserId ?? null,
         lineName: input.lineName ?? "",
+        idempotencyKey: input.idempotencyKey ?? null,
       })
       // the arbiter matches the partial unique index (status <> 'cancelled'):
       // a live booking keeps its slot exclusive; cancelled ones free it
@@ -1049,6 +1144,10 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
 
   const row = inserted[0];
   if (!row) return null; // slot taken mid-flight
+  if (replayed) {
+    const d = row.dentistId === null ? { slug: "", name: "" } : await dentistName(row.dentistId);
+    return { ...toAppointmentDTO(row, d.slug, d.name), replayed: true };
+  }
 
   // pooled rows have no dentist yet — the slug stays empty until settlePool
   // or the staff console assigns one
