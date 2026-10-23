@@ -16,6 +16,7 @@ import {
   SectionHead,
   ServiceGrid,
 } from "@/components/patient/parts";
+import { NextBookings } from "@/components/patient/NextBookings";
 
 /**
  * The patient home page — the locked base design: solid colour blocks, no
@@ -33,11 +34,18 @@ export function HomePage({
   hours,
   info,
   todayKey,
+  today,
+  nowMin,
+  cancelHours,
 }: {
   dentists: Dentist[];
   hours?: { day: string; isOpen: boolean; start: string; end: string }[];
   info?: ClinicInfoDTO | null;
   todayKey?: string;
+  /** the clinic's date and clock (Bangkok), for the next-visit slip */
+  today: string;
+  nowMin: number;
+  cancelHours: number;
 }) {
   const t = useT();
   return (
@@ -82,6 +90,16 @@ export function HomePage({
               </span>
             </Link>
           </div>
+
+          {/* the family's own upcoming visits — only when signed in and booked */}
+          <NextBookings
+            today={today}
+            nowMin={nowMin}
+            cancelHours={cancelHours}
+            dentists={dentists}
+            clinicPhone={info?.phone ? { tel: info.phone, display: info.phoneDisplay || info.phone } : null}
+            mapUrl={info?.mapUrl ?? ""}
+          />
 
           <SectionHead title={t.services} href="/services" />
           <ServiceGrid items={services} />

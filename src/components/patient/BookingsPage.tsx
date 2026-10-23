@@ -11,7 +11,7 @@ import { hoursLabelEn, hoursLabelTh } from "@/lib/bookingRules";
 import { timeRange } from "@/lib/slots";
 import { useLine } from "@/lib/useLine";
 import { cancelBooking, myBookingsByLine } from "@/server/actions";
-import { RESCHEDULE_KEY, type RescheduleHandoff } from "@/components/patient/BookingFlow";
+import { postponeHref } from "@/components/patient/postpone";
 import { Check, Cross } from "@/components/shared/icons";
 import { EmptySlip, Eyebrow, LineSignIn, Screen, Slip } from "@/components/patient/screen";
 import { BookingsSkeleton } from "@/components/patient/PageLoading";
@@ -111,6 +111,13 @@ export function BookingsPage({
 
   /** the ref whose "cancel?" question is open, and the one being cancelled */
   const [asking, setAsking] = useState<string | null>(null);
+  // "ยกเลิก" on the home page's slip lands here with ?cancel=<ref>: ask at once
+  const [askFromLink, setAskFromLink] = useState(true);
+  if (askFromLink && rows) {
+    setAskFromLink(false);
+    const ref = new URLSearchParams(window.location.search).get("cancel");
+    if (ref && rows.some((r) => r.ref === ref)) setAsking(ref);
+  }
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [cancelErr, setCancelErr] = useState<string | null>(null);
   /** refs the server said are too close to change online (the clock moved on) */
@@ -142,23 +149,8 @@ export function BookingsPage({
     .filter((b) => !live(b.status) || b.date < today)
     .sort((a, b) => (a.date + a.time > b.date + b.time ? -1 : 1));
 
-  /** the old slot rides in sessionStorage only for the banner on /book */
   function doPostpone(a: Row) {
-    const handoff: RescheduleHandoff = {
-      ref: a.ref,
-      date: a.date,
-      time: a.time,
-      childName: a.childName,
-      ageGroup: a.ageGroup,
-    };
-    try {
-      sessionStorage.setItem(RESCHEDULE_KEY, JSON.stringify(handoff));
-    } catch {
-      // storage blocked — the flow just shows the ref without the old time
-    }
-    const q = new URLSearchParams({ r: a.ref, t: a.treatmentKey });
-    if (a.dentistSlug) q.set("d", a.dentistSlug);
-    router.push(`/book?${q.toString()}`);
+    router.push(postponeHref(a));
   }
 
   async function doCancel(a: Row) {

@@ -1600,3 +1600,102 @@ textarea.fi { resize: vertical; min-height: 56px; line-height: 1.5; }
   line-height: 1.5;
   color: var(--ink-3);
 }
+
+/* ---------- home: the family's next visit (NextBookings) ---------- */
+
+.nextList { display: flex; flex-direction: column; gap: 8px; }
+
+.nextSlip {
+  display: flex;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid rgba(214, 155, 190, 0.34);
+  border-radius: var(--r-card);
+}
+/* the date stub, torn off along a dashed line like the booking slip */
+.nsDate {
+  flex: none;
+  width: 66px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: #fdf3f8;
+  border-right: 1px dashed rgba(214, 155, 190, 0.6);
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.nsDate b {
+  font-family: var(--font-display-stack);
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+}
+.nextSlip.today .nsDate { background: var(--rose-2); color: #fff; }
+.nextSlip.today .nsDate b { color: #fff; }
+
+.nsBody { flex: 1; min-width: 0; padding: 11px 12px; display: flex; flex-direction: column; gap: 2px; }
+.nsChip {
+  align-self: flex-start;
+  margin-bottom: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fdf3f8;
+  color: var(--rose-deep);
+  font-size: 11px;
+}
+.nextSlip.today .nsChip { background: var(--rose-2); color: #fff; }
+.nsVisit + .nsVisit { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.nsVisit { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nsTime { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.nsLine, .nsRef {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nsRef { color: var(--muted); }
+.nsActs { display: flex; gap: 6px; margin-top: 8px; }
+.nsBtn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(214, 155, 190, 0.45);
+  background: var(--card);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 11.5px;
+  text-decoration: none;
+}
+.nsBtn:active { transform: scale(0.97); }
+
+/* later visits: one quiet row each */
+.nextRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--card);
+  border: 1px solid rgba(214, 155, 190, 0.34);
+  border-radius: 14px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.nrDate {
+  flex: none;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: var(--ink-2);
+}
+.nrDate b { font-family: var(--font-display-stack); font-weight: 500; font-size: 16px; color: var(--ink); }
+.nrText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
