@@ -1616,3 +1616,30 @@ textarea.fi { resize: vertical; min-height: 56px; line-height: 1.5; }
   color: var(--ink-3);
 }
 .lateNote .softBtn { flex: none; text-decoration: none; }
+
+/* ---------- the dentist step: few dentists a day, so big faces ---------- */
+
+.pick.big .pickRow {
+  gap: 14px;
+  padding: 14px;
+}
+.pick.big .disc,
+.pick.big .dFace {
+  width: 76px;
+  height: 76px;
+}
+.pick.big .pn {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.pick.big .pp { font-size: 11.5px; }
+/* a line about the dentist, two lines at most */
+.pick.big .pb {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}

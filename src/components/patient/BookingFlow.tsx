@@ -196,17 +196,20 @@ function TreatRow({ k, onPick }: { k: TreatmentKey; onPick: (k: TreatmentKey) =>
   );
 }
 
+/** one dentist on the dentist step — a big face and a line about them: a
+ *  clinic has only 4–5 dentists a day, so each gets room to be recognised */
 function DentistRow({ d, onPick }: { d: Dentist; onPick: (slug: string) => void }) {
   const { t, lang } = useLang();
   const x = d.text[lang];
   return (
     <button type="button" className="pickRow" onClick={() => onPick(d.slug)}>
-      <DentistAvatar d={d} alt={x.name} size={44} />
+      <DentistAvatar d={d} alt={x.name} size={76} />
       <span className="pt">
         <span className="pn">{x.name}</span>
         <span className="pp">
           {x.title} · {d.years} {t.common.years}
         </span>
+        {x.blurb ? <span className="pb">{x.blurb}</span> : null}
       </span>
       <Chevron />
     </button>
@@ -934,10 +937,10 @@ export function BookingFlow(props: BookingFlowProps) {
           {step === 2 ? (
             <>
               <Eyebrow>{t.booking.pickDentist}</Eyebrow>
-              <div className="pick">
+              <div className="pick big">
                 <button type="button" className="pickRow" onClick={() => pickDentist(null)}>
                   <span className="disc t-lav">
-                    <ServiceIcon k="kids" size={26} />
+                    <ServiceIcon k="kids" size={40} />
                   </span>
                   <span className="pt">
                     <span className="pn">{t.booking.anyone}</span>
