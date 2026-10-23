@@ -192,9 +192,26 @@ function TreatRow({ k, onPick }: { k: TreatmentKey; onPick: (k: TreatmentKey) =>
 
 /** one dentist on the dentist step — a big face and a line about them: a
  *  clinic has only 4–5 dentists a day, so each gets room to be recognised */
-function DentistRow({ d, onPick }: { d: Dentist; onPick: (slug: string) => void }) {
+function DentistRow({
+  d,
+  onPick,
+  soonest,
+  days,
+  today,
+}: {
+  d: Dentist;
+  onPick: (slug: string) => void;
+  /** their earliest free time for this treatment in the weeks loaded; null = none */
+  soonest: { date: string; time: string } | null;
+  /** the weekdays they work ("sun" …), from the loaded weeks */
+  days: string[];
+  today: string;
+}) {
   const { t, lang } = useLang();
   const x = d.text[lang];
+  const when = soonest
+    ? `${soonest.date === today ? t.bookingsPage.today : soonest.date === addDays(today, 1) ? t.bookingsPage.tomorrow : `${t.weekday[weekday(soonest.date) as keyof typeof t.weekday]} ${dayOfMonth(soonest.date)} ${t.month[monthKey(soonest.date)]}`} ${soonest.time}`
+    : null;
   return (
     <button type="button" className="pickRow" onClick={() => onPick(d.slug)}>
       <DentistAvatar d={d} alt={x.name} size={76} />
@@ -204,6 +221,14 @@ function DentistRow({ d, onPick }: { d: Dentist; onPick: (slug: string) => void 
           {x.title} · {d.years} {t.common.years}
         </span>
         {x.blurb ? <span className="pb">{x.blurb}</span> : null}
+        <span className="pAvail">
+          <span className={`pSoon${when ? "" : " none"}`}>{when ? `${t.booking.soonest} ${when}` : t.booking.noneSoon}</span>
+          {days.length ? (
+            <span className="pDays">
+              {t.booking.works} {days.map((k) => t.weekday[k as keyof typeof t.weekday]).join(" ")}
+            </span>
+          ) : null}
+        </span>
       </span>
       <Chevron />
     </button>
@@ -497,6 +522,28 @@ export function BookingFlow(props: BookingFlowProps) {
   const offered = (k: TreatmentKey) => dentistsForUI(dentists, k, group).length > 0;
   /** slugs able to do the picked treatment — bounds the calendar in "any" mode */
   const capable = useMemo(() => new Set(roster.map((d) => d.slug)), [roster]);
+
+  /* the dentist step: each dentist's earliest free time for this treatment,
+     and the weekdays they work — from the weeks already loaded */
+  const dentistAvail = useMemo(() => {
+    const out = new Map<string, { soonest: { date: string; time: string } | null; days: string[] }>();
+    const dates = Object.keys(slots).sort();
+    for (const d of roster) {
+      let soonest: { date: string; time: string } | null = null;
+      const days = new Set<string>();
+      for (const iso of dates) {
+        const rows = slots[iso] ?? [];
+        if (rows.some((r) => r.dentistSlug === d.slug)) days.add(weekday(iso));
+        if (soonest) continue;
+        const gone = (hhmm: string) => minutesUntil(today, nowMin, iso, hhmm) < leadMin;
+        const first = startTimes(rows, load[iso] ?? {}, chairs, d.slug, capable, durationMin, gone)[0];
+        if (first) soonest = { date: iso, time: first };
+      }
+      const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+      out.set(d.slug, { soonest, days: order.filter((k) => days.has(k)) });
+    }
+    return out;
+  }, [slots, load, roster, today, nowMin, leadMin, chairs, capable, durationMin]);
 
   /* the free times on the picked day — for a named dentist their own open
      rows; for "any dentist" every clock time whose chair load still has room
@@ -870,7 +917,14 @@ export function BookingFlow(props: BookingFlowProps) {
                   <Chevron />
                 </button>
                 {roster.map((d) => (
-                  <DentistRow key={d.slug} d={d} onPick={pickDentist} />
+                  <DentistRow
+                    key={d.slug}
+                    d={d}
+                    onPick={pickDentist}
+                    soonest={dentistAvail.get(d.slug)?.soonest ?? null}
+                    days={dentistAvail.get(d.slug)?.days ?? []}
+                    today={today}
+                  />
                 ))}
               </div>
             </>

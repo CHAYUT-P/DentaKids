@@ -1699,3 +1699,15 @@ textarea.fi { resize: vertical; min-height: 56px; line-height: 1.5; }
 }
 .nrDate b { font-family: var(--font-display-stack); font-weight: 500; font-size: 16px; color: var(--ink); }
 .nrText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+
+/* the dentist step: earliest free time + working days */
+.pAvail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; }
+.pSoon {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fdf3f8;
+  color: var(--rose-deep);
+  font-size: 11px;
+}
+.pSoon.none { background: #f4f0f7; color: var(--muted); }
+.pDays { font-size: 11px; color: var(--ink-3); }
