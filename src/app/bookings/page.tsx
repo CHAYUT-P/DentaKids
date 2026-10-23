@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { BookingsPage } from "@/components/patient/BookingsPage";
 import { nowMinutes, todayISO } from "@/lib/dates";
 import { TreatmentsProvider } from "@/lib/treatmentsContext";
-import { getBookingRules, getClinicInfo, listClinicDays, listDentists, listTreatmentCatalog } from "@/server/queries";
+import { getBookingRules, getClinicInfo, listDentists, listTreatmentCatalog } from "@/server/queries";
 
 export const metadata: Metadata = {
   title: "Denta Kids · ประวัติการจอง",
@@ -21,12 +21,11 @@ export default async function Page() {
   await connection();
   // every treatment and dentist, hidden/retired ones too — an old booking
   // still shows its name
-  const [catalog, dentists, info, rules, days] = await Promise.all([
+  const [catalog, dentists, info, rules] = await Promise.all([
     listTreatmentCatalog(),
     listDentists(),
     getClinicInfo(),
     getBookingRules(),
-    listClinicDays(),
   ]);
   const dentistNames = Object.fromEntries(
     dentists.map((d) => [d.slug, { th: d.text.th.name, en: d.text.en.name || d.text.th.name }]),
@@ -38,7 +37,6 @@ export default async function Page() {
         nowMin={nowMinutes()}
         cancelHours={rules.cancelHours}
         clinicPhone={info?.phone ? { tel: info.phone, display: info.phoneDisplay || info.phone } : null}
-        hours={Object.fromEntries(days.map((d) => [d.day, { start: d.start, end: d.end }]))}
         dentistNames={dentistNames}
         address={{ th: info?.addressTh ?? "", en: info?.addressEn || info?.addressTh || "" }}
       />

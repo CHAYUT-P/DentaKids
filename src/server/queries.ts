@@ -196,22 +196,6 @@ export interface WaitlistDTO {
   note: string;
 }
 
-/** a website sign-up for a full day's queue (no fixed time) */
-export interface DayQueueDTO {
-  id: number;
-  ref: string;
-  visitDate: string;
-  childName: string;
-  phone: string;
-  treatmentKey: TreatmentKey;
-  ageGroup: AgeGroup | null;
-  lineName: string;
-  note: string;
-  /** "expected" until the desk ticks them in; then it is a walk-in */
-  status: "expected" | "waiting" | "in_chair" | "done" | "cancelled";
-  createdAt: string;
-}
-
 export interface NotificationDTO {
   id: number;
   type: string;
@@ -595,9 +579,13 @@ export async function slotsForDates(dates: string[], excludeId?: number): Promis
       // only this weekday's shift — never the other six rows
       const shift = shifts.find((s) => s.dentistId === d.id && s.weekday === weekdayNum);
       if (!shift) continue;
-      // inside the dentist's shift AND the clinic's opening hours that day
+      // inside the dentist's shift AND the clinic's opening hours that day,
+      // always on the shift's own half-hour grid (an odd opening time like
+      // 08:45 must not create 08:45, 09:15 … slots that dodge 09:00 bookings)
       const endM = Math.min(minutesOf(shift.end), minutesOf(clinic.end));
-      for (let m = Math.max(minutesOf(shift.start), minutesOf(clinic.start)); m + 30 <= endM; m += 30) {
+      let first = minutesOf(shift.start);
+      while (first < minutesOf(clinic.start)) first += 30;
+      for (let m = first; m + 30 <= endM; m += 30) {
         const hhmm = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
         rows.push({ dentistId: d.id, dentistSlug: d.slug, time: hhmm, taken: taken.has(`${date}:${d.id}:${hhmm}`) });
       }
@@ -1150,6 +1138,10 @@ export async function staffMoveGuarded(
     if (live && dentistId !== null && (await overlapsDentist(dentistId, date, time, row.durationMin, id, tx))) {
       return "slot_taken";
     }
+    // an "any dentist" booking needs a free chair for every half-hour it runs
+    if (live && dentistId === null && (await chairsFull(tx, date, coveredTimes(time, row.durationMin), id))) {
+      return "slot_taken";
+    }
     try {
       await tx.update(appointment).set({ ...patch, updatedAt: new Date() }).where(eq(appointment.id, id));
     } catch {
@@ -1624,20 +1616,7 @@ export async function listWaitlist(): Promise<WaitlistDTO[]> {
     .select({ w: waitlistEntry, slug: dentist.slug })
     .from(waitlistEntry)
     .leftJoin(dentist, eq(dentist.id, waitlistEntry.dentistId))
-    // here today: walk-ins added today, and day-queue sign-ups for today
-    // once the desk ticked them in (still-expected ones are in listDayQueue)
-    .where(
-      and(
-        inArray(waitlistEntry.status, ["waiting", "in_chair", "done"]),
-        or(
-          eq(waitlistEntry.visitDate, todayISO()),
-          and(
-            sql`${waitlistEntry.visitDate} is null`,
-            sql`(${waitlistEntry.createdAt} at time zone 'Asia/Bangkok')::date = ${todayISO()}::date`,
-          ),
-        ),
-      ),
-    )
+    .where(sql`(${waitlistEntry.createdAt} at time zone 'Asia/Bangkok')::date = ${todayISO()}::date`)
     .orderBy(asc(waitlistEntry.arrivedAt));
 
   return rows.map((r) => ({
@@ -1692,152 +1671,6 @@ export async function updateWaitlistStatus(
     // undefined = leave the assignment alone; null = deliberately un-assign
     .set({ status, ...(dentistId !== undefined ? { dentistId } : {}), updatedAt: new Date() })
     .where(eq(waitlistEntry.id, id));
-}
-
-/* ═══════════════════════════════ day queue ══════════════════════════════ */
-
-function toDayQueueDTO(w: typeof waitlistEntry.$inferSelect): DayQueueDTO {
-  return {
-    id: w.id,
-    ref: w.ref ?? "",
-    visitDate: w.visitDate ?? "",
-    childName: w.childName,
-    phone: w.guardianPhone,
-    treatmentKey: asIconKey(w.treatmentKey),
-    ageGroup: isAgeGroup(w.ageGroup) ? w.ageGroup : null,
-    lineName: w.lineName,
-    note: w.note,
-    status: w.status as DayQueueDTO["status"],
-    createdAt: w.createdAt.toISOString(),
-  };
-}
-
-/** sign-ups still expected from `from` on, by day and then sign-up order */
-export async function listDayQueue(from: string): Promise<DayQueueDTO[]> {
-  const rows = await db
-    .select()
-    .from(waitlistEntry)
-    .where(and(gte(waitlistEntry.visitDate, from), eq(waitlistEntry.status, "expected")))
-    .orderBy(asc(waitlistEntry.visitDate), asc(waitlistEntry.createdAt));
-  return rows.map(toDayQueueDTO);
-}
-
-/** how many have signed up for each of these days (cancelled ones don't count) */
-export async function dayQueueCounts(dates: string[]): Promise<Record<string, number>> {
-  if (dates.length === 0) return {};
-  const sorted = [...dates].sort();
-  const rows = await db
-    .select({ date: waitlistEntry.visitDate, n: sql<number>`count(*)::int` })
-    .from(waitlistEntry)
-    .where(
-      and(
-        gte(waitlistEntry.visitDate, sorted[0]),
-        lte(waitlistEntry.visitDate, sorted[sorted.length - 1]),
-        ne(waitlistEntry.status, "cancelled"),
-      ),
-    )
-    .groupBy(waitlistEntry.visitDate);
-  return Object.fromEntries(rows.filter((r) => r.date).map((r) => [r.date as string, r.n]));
-}
-
-/** everything this LINE account signed up for, newest day last */
-export async function listDayQueueForLine(lineUserId: string): Promise<DayQueueDTO[]> {
-  const rows = await db
-    .select()
-    .from(waitlistEntry)
-    .where(and(eq(waitlistEntry.lineUserId, lineUserId), isNotNull(waitlistEntry.visitDate)))
-    .orderBy(asc(waitlistEntry.visitDate));
-  return rows.map(toDayQueueDTO);
-}
-
-async function nextQueueRef(q: Pick<typeof db, "select">): Promise<string> {
-  for (let digits = 6; ; digits++) {
-    for (let i = 0; i < 10; i++) {
-      const ref = `Q-${Math.floor(10 ** (digits - 1) + Math.random() * 9 * 10 ** (digits - 1))}`;
-      const hit = await q.select({ id: waitlistEntry.id }).from(waitlistEntry).where(eq(waitlistEntry.ref, ref));
-      if (hit.length === 0) return ref;
-    }
-  }
-}
-
-/**
- * Sign up for a day's queue. Under a per-day lock: the clinic's cap can't be
- * overrun by families signing up at the same moment, and one LINE account
- * gets one place per day (signing up again returns the same place).
- */
-export async function joinDayQueue(input: {
-  date: string;
-  childName: string;
-  phone: string;
-  treatmentKey: TreatmentKey;
-  ageGroup: AgeGroup;
-  note: string;
-  lineUserId: string | null;
-  lineName: string;
-  max: number;
-}): Promise<{ ok: true; entry: DayQueueDTO; replayed: boolean } | { ok: false; error: "full" }> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`queue-day:${input.date}`}))`);
-    if (input.lineUserId) {
-      const [mine] = await tx
-        .select()
-        .from(waitlistEntry)
-        .where(
-          and(
-            eq(waitlistEntry.visitDate, input.date),
-            eq(waitlistEntry.lineUserId, input.lineUserId),
-            ne(waitlistEntry.status, "cancelled"),
-          ),
-        );
-      if (mine) return { ok: true as const, entry: toDayQueueDTO(mine), replayed: true };
-    }
-    const [{ n }] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(waitlistEntry)
-      .where(and(eq(waitlistEntry.visitDate, input.date), ne(waitlistEntry.status, "cancelled")));
-    if (n >= input.max) return { ok: false as const, error: "full" as const };
-    const [row] = await tx
-      .insert(waitlistEntry)
-      .values({
-        childName: input.childName,
-        guardianPhone: input.phone.replace(/\D/g, ""),
-        treatmentKey: input.treatmentKey,
-        arrivedAt: "",
-        status: "expected",
-        note: input.note,
-        visitDate: input.date,
-        ref: await nextQueueRef(tx),
-        lineUserId: input.lineUserId,
-        lineName: input.lineName,
-        ageGroup: input.ageGroup,
-      })
-      .returning();
-    return { ok: true as const, entry: toDayQueueDTO(row), replayed: false };
-  });
-}
-
-/** the family withdraws a sign-up that hasn't been ticked in yet */
-export async function cancelDayQueue(ref: string, lineUserId: string): Promise<DayQueueDTO | null> {
-  const [row] = await db
-    .update(waitlistEntry)
-    .set({ status: "cancelled", updatedAt: new Date() })
-    .where(and(eq(waitlistEntry.ref, ref), eq(waitlistEntry.lineUserId, lineUserId), eq(waitlistEntry.status, "expected")))
-    .returning();
-  return row ? toDayQueueDTO(row) : null;
-}
-
-/**
- * The desk ticks a sign-up in when the family arrives: from then on it is a
- * walk-in in today's line, stamped with the arrival time. Staff can also
- * cancel one (the family called).
- */
-export async function setDayQueueStatus(id: number, status: "waiting" | "cancelled"): Promise<boolean> {
-  const rows = await db
-    .update(waitlistEntry)
-    .set(status === "waiting" ? { status, arrivedAt: clinicNowHHMM(), updatedAt: new Date() } : { status, updatedAt: new Date() })
-    .where(and(eq(waitlistEntry.id, id), eq(waitlistEntry.status, "expected")))
-    .returning({ id: waitlistEntry.id });
-  return rows.length > 0;
 }
 
 export async function removeWaitlist(id: number): Promise<void> {
@@ -2153,6 +1986,7 @@ export async function updateDentist(slug: string, patch: DentistUpdate): Promise
   if (!id) throw new Error(`unknown dentist: ${slug}`);
 
   const { text, treats, treatAges, shifts, ...plain } = patch;
+  if (shifts) assertShiftsOnGrid(shifts);
 
   if (Object.keys(plain).length > 0) {
     await db
@@ -2194,6 +2028,20 @@ export async function updateDentist(slug: string, patch: DentistUpdate): Promise
   }
 }
 
+/**
+ * Shift times on the half-hour grid, start before end: bookings are 30-minute
+ * slots counted from the shift start, so a 09:15 shift would make slots that
+ * dodge other bookings at 09:00/09:30.
+ */
+function assertShiftsOnGrid(shifts: { start: string; end: string }[]): void {
+  const onGrid = (t: unknown) => typeof t === "string" && /^([01]\d|2[0-3]):(00|30)$/.test(t);
+  for (const s of shifts) {
+    if (!onGrid(s.start) || !onGrid(s.end) || s.start >= s.end) {
+      throw new Error("invalid shift time (use :00 or :30, start before end)");
+    }
+  }
+}
+
 export interface NewDentistInput {
   slug: string;
   years: number;
@@ -2207,6 +2055,7 @@ export interface NewDentistInput {
 }
 
 export async function createDentist(input: NewDentistInput): Promise<void> {
+  assertShiftsOnGrid(input.shifts);
   const sorts = await db.select({ s: dentist.sort }).from(dentist);
   const sort = sorts.reduce((m, r) => Math.max(m, r.s), -1) + 1;
   const [row] = await db

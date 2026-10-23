@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { services } from "@/data/services";
 import { nowMinutes, addDays, todayISO } from "@/lib/dates";
 import { toUIDentists } from "@/lib/convert";
-import { dayQueueCounts, getBookingRules, getChairs, getClinicInfo, listActiveDentists, listClinicDays, listHolidays, listTreatmentCatalog, slotLoadForDates, slotsForDates } from "@/server/queries";
+import { getBookingRules, getChairs, getClinicInfo, listActiveDentists, listClinicDays, listHolidays, listTreatmentCatalog, slotLoadForDates, slotsForDates } from "@/server/queries";
 import { BookingFlow } from "@/components/patient/BookingFlow";
 import { TreatmentsProvider } from "@/lib/treatmentsContext";
 
@@ -49,12 +49,7 @@ export default async function Page({ searchParams }: PageProps<"/book">) {
   // one batch; the calendar fetches later months (bookingAvailability) when
   // the family opens them. Chair load is for "any dentist" mode.
   const dates = Array.from({ length: Math.min(windowDays, FIRST_DAYS) }, (_, i) => addDays(today, i));
-  const [slots, load, chairs, queueCounts] = await Promise.all([
-    slotsForDates(dates),
-    slotLoadForDates(dates),
-    getChairs(),
-    dayQueueCounts(dates),
-  ]);
+  const [slots, load, chairs] = await Promise.all([slotsForDates(dates), slotLoadForDates(dates), getChairs()]);
 
   // the clinic's treatment list (names, icons, prices, show/hide) — staff-edited
   const catalog = await listTreatmentCatalog();
@@ -74,12 +69,10 @@ export default async function Page({ searchParams }: PageProps<"/book">) {
       today={today}
       nowMin={nowMinutes()}
       dentists={toUIDentists(dentistRows)}
-      openDays={clinicDays.map((c) => ({ day: c.day, isOpen: c.isOpen, start: c.start, end: c.end }))}
+      openDays={clinicDays.map((c) => ({ day: c.day, isOpen: c.isOpen }))}
       holidays={holidays.map((h) => ({ start: h.start, end: h.end, name: h.name }))}
       windowDays={windowDays}
       leadMin={rules.leadHours * 60}
-      dayQueueMax={rules.dayQueueMax}
-      queueCounts={queueCounts}
       slots={slots}
       load={load}
       chairs={chairs}

@@ -36,7 +36,6 @@ import {
   staffUpdateAppointment,
   staffUpdateChairs,
   staffUpdateBookingRules,
-  staffSetDayQueueStatus,
   staffAppointmentsBefore,
   staffUpdateClinicInfo,
   staffUpdateDay,
@@ -116,10 +115,6 @@ export interface StaffContextType {
   dentists: EditableDentist[];
   patients: PatientRecord[];
   waitlist: WaitlistEntry[];
-  /** website sign-ups for full days (no fixed time), still expected — today and later */
-  dayQueue: StaffBootstrap["dayQueue"];
-  /** tick a sign-up in when the family arrives (it joins today's walk-ins), or cancel it */
-  setDayQueueStatus: (id: number, status: "waiting" | "cancelled") => Promise<boolean>;
   visitRecords: VisitRecord[];
   notifications: StaffNotification[];
   servicePrices: Record<IconKey, number | null>;
@@ -220,7 +215,6 @@ function withDefaults(b: StaffBootstrap): StaffBootstrap {
     dentistLeaves: b.dentistLeaves ?? [],
     holidays: b.holidays ?? [],
     waitlist: b.waitlist ?? [],
-    dayQueue: b.dayQueue ?? [],
     visitRecords: b.visitRecords ?? [],
     notifications: b.notifications ?? [],
     lineUnread: b.lineUnread ?? 0,
@@ -288,9 +282,6 @@ export function StaffProvider({
       setSyncing(true);
       try {
         await fn();
-        const fresh = await staffBootstrap();
-        setState((prev) => mergeFresh(prev, fresh));
-        return true;
       } catch (e) {
         console.error(e);
         showToast(`ข้อผิดพลาด: ${what} ไม่สำเร็จ`);
@@ -298,11 +289,22 @@ export function StaffProvider({
         // back to what the server really has
         staffBootstrap()
           .then((fresh) => setState((prev) => mergeFresh(prev, fresh)))
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => setSyncing(false));
         return false;
+      }
+      // saved. The fresh download after it is only for the screen: if it
+      // fails (a network blip), the save still counts and the next live
+      // update or poll brings the data
+      try {
+        const fresh = await staffBootstrap();
+        setState((prev) => mergeFresh(prev, fresh));
+      } catch {
+        // shown on the next refresh
       } finally {
         setSyncing(false);
       }
+      return true;
     },
     [showToast],
   );
@@ -811,12 +813,6 @@ export function StaffProvider({
     [mutate],
   );
 
-  const setDayQueueStatus = useCallback(
-    (id: number, status: "waiting" | "cancelled") =>
-      mutate(status === "waiting" ? "เช็คอินคิวรอ" : "ยกเลิกคิวรอ", () => staffSetDayQueueStatus(id, status)),
-    [mutate],
-  );
-
   const updateBookingRules = useCallback(
     (patch: Partial<BookingRules>) => {
       setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
@@ -906,8 +902,6 @@ export function StaffProvider({
       dentists: state.dentists,
       patients: state.patients,
       waitlist: state.waitlist,
-      dayQueue: state.dayQueue,
-      setDayQueueStatus,
       visitRecords: state.visitRecords ?? [],
       notifications: state.notifications,
       servicePrices: state.servicePrices,
@@ -970,7 +964,7 @@ export function StaffProvider({
       deleteAppointment, updateDentist, createDentist, createPatient, updatePatient, addPatientChild,
       addWaitlist, updateWaitlistStatus, assignWaitingDentist, removeWaitlist, updateServicePrice, createTreatment, updateTreatment, setAllShowPrice, addDentistLeave, removeDentistLeave, onLeave,
       saveVisitRecord, finishVisit, refresh,
-      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateBookingRules, setDayQueueStatus, historyLoaded, loadHistory, updateClinicInfo, assignDentist,
+      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateBookingRules, historyLoaded, loadHistory, updateClinicInfo, assignDentist,
       markAllNotificationsRead, simulateOnlineBooking,
     ],
   );

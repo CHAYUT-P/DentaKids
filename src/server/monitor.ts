@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { desc, gt, sql } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { errorEvent } from "@/db/schema";
@@ -62,14 +62,11 @@ export async function reportError(source: ErrorSource, err: unknown, where = "")
     const to = process.env.ALERT_LINE_USER_ID;
     const due = !row.alertedAt || Date.now() - row.alertedAt.getTime() > ALERT_EVERY_MS;
     if (!to || !due || !ALERTING.includes(source)) return;
-    const [{ hour, day }] = await db
-      .select({
-        hour: sql<number>`count(*) filter (where ${errorEvent.alertedAt} > now() - interval '1 hour')::int`,
-        day: sql<number>`count(*)::int`,
-      })
-      .from(errorEvent)
-      .where(gt(errorEvent.alertedAt, new Date(Date.now() - 24 * ALERT_EVERY_MS)));
-    if (hour >= MAX_ALERTS_PER_HOUR || day >= MAX_ALERTS_PER_DAY) return;
+    // count the alerts actually sent — one error repeating every hour is
+    // still one alert per hour, and they all spend the OA's message quota
+    const { checkRate } = await import("@/server/queries");
+    if (!(await checkRate("alerts:hour", MAX_ALERTS_PER_HOUR, 3600))) return;
+    if (!(await checkRate("alerts:day", MAX_ALERTS_PER_DAY, 24 * 3600))) return;
 
     const { pushLineAlert } = await import("@/server/line");
     const sent = await pushLineAlert(

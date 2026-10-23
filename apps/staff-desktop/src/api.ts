@@ -3,7 +3,6 @@ import type { TreatmentInfo, TreatmentKey } from "@/lib/treatments";
 import type { ClinicDaySetting } from "@/lib/clinicSettings";
 import type { DfStatement, ReportData } from "@/server/reports";
 import type { ChatConversation, ChatMessage } from "@/server/chat";
-import type { DayQueueDTO } from "@/server/queries";
 import type { AuditRow, ClockRow, Role, StaffUserInfo, WhoAmI } from "@/lib/roles";
 import type { ImportField } from "@/lib/dataio";
 import type { Consumable, Expense, LabOrder, MoveKind, StockItem, StockMove, Supplier } from "@/lib/stock";
@@ -140,9 +139,7 @@ export interface StaffBootstrap {
   lineUnread: number;
   /** the change number this data is current to (live updates) */
   changeSeq: number;
-  settings: { chairs: number; windowDays: number; leadHours: number; cancelHours: number; dayQueueMax: number };
-  /** website sign-ups for full days, still expected (today and later) */
-  dayQueue: DayQueueDTO[];
+  settings: { chairs: number; windowDays: number; leadHours: number; cancelHours: number };
   /** which screens to show — the server decides (STAFF_EDITION). A server
    *  older than this field leaves it out; App.tsx falls back then. */
   edition: "queue" | "full";
@@ -215,10 +212,6 @@ export function assignPoolDentist(id: number, dentistId: number) {
 
 export function staffUpdateChairs(chairs: number) {
   return call<void>("updateChairs", [chairs]);
-}
-
-export function staffSetDayQueueStatus(id: number, status: "waiting" | "cancelled") {
-  return call<void>("setDayQueueStatus", [id, status]);
 }
 
 export function staffUpdateBookingRules(patch: Partial<StaffBootstrap["settings"]>) {

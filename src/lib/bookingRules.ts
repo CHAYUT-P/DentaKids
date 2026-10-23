@@ -8,27 +8,22 @@
  * - leadHours    a booking must be made at least this long before its time
  * - cancelHours  a family may cancel or move their own booking until this long
  *                before its time (0 = right up to the appointment)
- * - dayQueueMax  how many families may join a full day's queue without a fixed
- *                time (0 = no day queue)
  */
 export interface BookingRules {
   windowDays: number;
   leadHours: number;
   cancelHours: number;
-  dayQueueMax: number;
 }
 
 export const DEFAULT_WINDOW_DAYS = 14;
 export const MAX_WINDOW_DAYS = 365;
 /** book-before and cancel-before: whole hours, up to a week */
 export const MAX_RULE_HOURS = 168;
-export const MAX_DAY_QUEUE = 50;
 
 export const DEFAULT_RULES: BookingRules = {
   windowDays: DEFAULT_WINDOW_DAYS,
   leadHours: 1,
   cancelHours: 0,
-  dayQueueMax: 10,
 };
 
 /** clinic_setting keys */
@@ -36,7 +31,6 @@ export const RULE_KEYS: Record<keyof BookingRules, string> = {
   windowDays: "booking_window_days",
   leadHours: "booking_lead_hours",
   cancelHours: "cancel_before_hours",
-  dayQueueMax: "day_queue_max",
 };
 
 /** the choices the settings page offers for the window */
@@ -69,8 +63,6 @@ export function clampRule(key: keyof BookingRules, n: unknown): number {
       return clampInt(n, 0, MAX_RULE_HOURS, DEFAULT_RULES.leadHours);
     case "cancelHours":
       return clampInt(n, 0, MAX_RULE_HOURS, DEFAULT_RULES.cancelHours);
-    case "dayQueueMax":
-      return clampInt(n, 0, MAX_DAY_QUEUE, DEFAULT_RULES.dayQueueMax);
   }
 }
 

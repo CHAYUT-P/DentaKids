@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 import type { TreatmentKey } from "@/lib/treatments";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useLang } from "@/i18n/lang";
-import { fmtShort, minutesUntil, weekday } from "@/lib/dates";
+import { fmtShort, minutesUntil } from "@/lib/dates";
 import { hoursLabelEn, hoursLabelTh } from "@/lib/bookingRules";
 import { timeRange } from "@/lib/slots";
 import { useLine } from "@/lib/useLine";
-import { cancelBooking, cancelDayQueueEntry, myBookingsByLine, myDayQueueByLine } from "@/server/actions";
+import { cancelBooking, myBookingsByLine } from "@/server/actions";
 import { RESCHEDULE_KEY, type RescheduleHandoff } from "@/components/patient/BookingFlow";
 import { Check, Cross } from "@/components/shared/icons";
 import { EmptySlip, Eyebrow, LineSignIn, Screen, Slip } from "@/components/patient/screen";
@@ -31,7 +31,6 @@ import { ServiceIcon } from "@/components/shared/serviceIcons";
  */
 
 type Row = NonNullable<Awaited<ReturnType<typeof myBookingsByLine>>>[number];
-type QRow = NonNullable<Awaited<ReturnType<typeof myDayQueueByLine>>>[number];
 type Names = Record<string, { th: string; en: string }>;
 
 function PastRow({ a, names }: { a: Row; names: Names }) {
@@ -74,7 +73,6 @@ export function BookingsPage({
   nowMin,
   cancelHours,
   clinicPhone,
-  hours,
   dentistNames,
   address,
 }: {
@@ -84,29 +82,24 @@ export function BookingsPage({
   /** families change their own bookings until this many hours before (0 = up to the time) */
   cancelHours: number;
   clinicPhone: { tel: string; display: string } | null;
-  /** opening hours by weekday ("mon" …) — when a day-queue family may come */
-  hours: Record<string, { start: string; end: string }>;
   dentistNames: Names;
   address: { th: string; en: string };
 }) {
   const { t, lang } = useLang();
-  const tr = useTreatments();
   const line = useLine();
   const router = useRouter();
 
   /** null = still loading (or the token was refused — `failed` says which) */
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [queue, setQueue] = useState<QRow[]>([]);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (line.status !== "in") return;
     let cancelled = false;
-    Promise.all([myBookingsByLine(line.token), myDayQueueByLine(line.token).catch(() => [])])
-      .then(([r, q]) => {
+    myBookingsByLine(line.token)
+      .then((r) => {
         if (cancelled) return;
         if (r) setRows(r);
         else setFailed(true);
-        setQueue(q ?? []);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -137,7 +130,6 @@ export function BookingsPage({
       ) : null}
     </div>
   );
-  const nextQueue = queue.filter((q) => q.status === "expected" && q.date >= today);
 
   // the next visit: a live booking from today onwards — confirmed, checked in,
   // or in the chair right now all still belong on the slip
@@ -183,18 +175,6 @@ export function BookingsPage({
     } else {
       setCancelErr(a.ref);
     }
-  }
-
-  async function doCancelQueue(q: QRow) {
-    if (line.status !== "in") return;
-    setCancelling(q.ref);
-    setCancelErr(null);
-    const r: { ok: boolean; error?: string } = await cancelDayQueueEntry(q.ref, line.token).catch(() => ({ ok: false }));
-    setCancelling(null);
-    setAsking(null);
-    if (r.ok) setQueue((prev) => prev.map((x) => (x.ref === q.ref ? { ...x, status: "cancelled" as const } : x)));
-    else if (r.error === "too_late") setLateRefs((l) => [...l, q.ref]);
-    else setCancelErr(q.ref);
   }
 
   if (line.status === "out" || failed) {
@@ -276,63 +256,9 @@ export function BookingsPage({
             {cancelErr === a.ref ? <p className="err">{t.bookingsPage.cancelFailed}</p> : null}
           </div>
         ))
-      ) : nextQueue.length === 0 ? (
+      ) : (
         <EmptySlip />
-      ) : null}
-
-      {/* full days the family queued for, no fixed time */}
-      {nextQueue.map((q) => {
-        const h = hours[weekday(q.date)];
-        return (
-          <div key={q.ref} className="upNext">
-            <div className="queueSlip">
-              <span className="qsK">{t.bookingsPage.queueLabel}</span>
-              <span className="qsRef">{q.ref}</span>
-              <span className="qsV">
-                {fmtShort(t, q.date)}
-                {h ? ` · ${t.bookingsPage.queueCome.replace("{start}", h.start).replace("{end}", h.end)}` : ""}
-              </span>
-              <span className="qsV">
-                {q.childName} · {tr.name(q.treatmentKey as TreatmentKey, lang)}
-              </span>
-            </div>
-            {tooLate(q.ref, q.date, h?.start ?? "00:00") ? (
-              callLine
-            ) : asking === q.ref ? (
-              <div className="cancelAsk">
-                <span className="caQ">{t.bookingsPage.confirmCancelQueue}</span>
-                <div className="twoBtn" style={{ marginTop: 0 }}>
-                  <button type="button" className="softBtn" disabled={cancelling === q.ref} onClick={() => setAsking(null)}>
-                    {t.bookingsPage.keepIt}
-                  </button>
-                  <button
-                    type="button"
-                    className="softBtn solid"
-                    disabled={cancelling === q.ref}
-                    onClick={() => void doCancelQueue(q)}
-                  >
-                    {cancelling === q.ref ? "…" : t.bookingsPage.yesCancel}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="twoBtn">
-                <button
-                  type="button"
-                  className="softBtn danger"
-                  onClick={() => {
-                    setCancelErr(null);
-                    setAsking(q.ref);
-                  }}
-                >
-                  {t.bookingsPage.cancelQueue}
-                </button>
-              </div>
-            )}
-            {cancelErr === q.ref ? <p className="err">{t.bookingsPage.cancelFailed}</p> : null}
-          </div>
-        );
-      })}
+      )}
 
       <Eyebrow>{t.bookingsPage.past}</Eyebrow>
       <div className="hist">

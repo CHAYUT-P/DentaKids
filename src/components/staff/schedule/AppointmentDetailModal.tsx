@@ -194,10 +194,13 @@ export function AppointmentDetailModal({
     onClose();
   };
 
-  const handleCancel = () => {
-    updateStatus(appointment.id, "cancelled");
-    if (hasLine && notify && message.trim()) void messageFamily(appointment.id, message);
+  const handleCancel = async () => {
+    const text = message;
     onClose();
+    // tell the family only once the cancel is really saved
+    if ((await updateAppointment(appointment.id, { status: "cancelled" })) && hasLine && notify && text.trim()) {
+      void messageFamily(appointment.id, text);
+    }
   };
 
   const handleSendMessage = async () => {

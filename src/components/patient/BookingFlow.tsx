@@ -29,11 +29,9 @@ import {
   bookAppointment,
   bookingAvailability,
   holdSlot,
-  joinDayQueue,
   releaseSlotHold,
   rescheduleBooking,
   type BookResult,
-  type DayQueueResult,
 } from "@/server/actions";
 import type { SlotRow } from "@/server/queries";
 import { Check, Chevron, ChevronLeft } from "@/components/shared/icons";
@@ -126,18 +124,14 @@ export interface BookingFlowProps {
   nowMin: number;
   /** the DB roster — carries `id` (the appointment FK) plus the UI profile */
   dentists: (Dentist & { id: number })[];
-  /** weekly open days and hours from clinic_day */
-  openDays: { day: string; isOpen: boolean; start: string; end: string }[];
+  /** weekly open days from clinic_day */
+  openDays: { day: string; isOpen: boolean }[];
   /** special closed dates from holiday */
   holidays: { start: string; end: string; name: string }[];
   /** how far ahead families may book — the clinic sets it (up to a year) */
   windowDays: number;
   /** book-before: a time this close (minutes) or closer can't be booked */
   leadMin: number;
-  /** a full day's no-fixed-time queue: places per day (0 = no queue) */
-  dayQueueMax: number;
-  /** sign-ups so far, per day, for the days sent with the page */
-  queueCounts: Record<string, number>;
   /** per-date slot occupancy for the first weeks of the window, keyed by
    *  YYYY-MM-DD; later months load when the calendar opens them */
   slots: Record<string, SlotRow[]>;
@@ -281,7 +275,6 @@ function DayCalendar({
   nowMin,
   leadMin,
   windowDays,
-  queueLeft,
   onMonth,
   date,
   onPick,
@@ -298,13 +291,11 @@ function DayCalendar({
   nowMin: number;
   leadMin: number;
   windowDays: number;
-  /** does this (full) day still take day-queue sign-ups? false = no queue */
-  queueLeft: (iso: string) => boolean;
   /** the calendar now shows this month (YYYY-MM-01) — load it if needed */
   onMonth: (month: string) => void;
   date: string | null;
   onPick: (iso: string) => void;
-  openDays: { day: string; isOpen: boolean; start: string; end: string }[];
+  openDays: { day: string; isOpen: boolean }[];
   holidays: { start: string; end: string; name: string }[];
   slots: Record<string, SlotRow[]>;
   /** null = "any dentist" (chair-load mode); a slug = that dentist's own grid */
@@ -387,23 +378,21 @@ function DayCalendar({
           const full =
             !out && !waiting && !closed && !off && !soon &&
             startTimes(daySlots, dayLoad, chairs, dentist, capable, durationMin, gone).length === 0;
-          // a full day can still take the no-fixed-time queue
-          const queue = full && queueLeft(iso);
           return (
             <button
               key={iso}
               type="button"
               className={`calDay${iso === today ? " today" : ""}${date === iso ? " on" : ""}${
                 closed ? " off" : ""
-              }${off ? " off" : ""}${full && !queue ? " full" : ""}${queue ? " queue" : ""}${out || waiting || soon ? " out" : ""}`}
-              disabled={out || waiting || soon || closed || off || (full && !queue)}
+              }${off ? " off" : ""}${full ? " full" : ""}${out || waiting || soon ? " out" : ""}`}
+              disabled={out || waiting || soon || closed || off || full}
               onClick={() => onPick(iso)}
               title={holidayName ?? undefined}
             >
               <span className="cdn">{dayOfMonth(iso)}</span>
               {closed ? <span className="cdt">{t.common.closedShort}</span> : null}
               {off ? <span className="cdt">{t.booking.dentistOff}</span> : null}
-              {full ? <span className="cdt">{queue ? t.booking.queueDay : t.booking.full}</span> : null}
+              {full ? <span className="cdt">{t.booking.full}</span> : null}
             </button>
           );
         })}
@@ -415,12 +404,11 @@ function DayCalendar({
 /* ═══════════════════════════════ the flow itself ═════════════════════════ */
 
 export function BookingFlow(props: BookingFlowProps) {
-  const { today, nowMin, dentists, openDays, holidays, chairs, popular, windowDays, leadMin, dayQueueMax } = props;
+  const { today, nowMin, dentists, openDays, holidays, chairs, popular, windowDays, leadMin } = props;
   /* availability: the first weeks came with the page; each further month is
      fetched once, the first time the calendar shows it */
   const [slots, setSlots] = useState(props.slots);
   const [load, setLoad] = useState(props.load);
-  const [queueCounts, setQueueCounts] = useState(props.queueCounts);
   const [monthErr, setMonthErr] = useState(false);
   const asked = useRef(new Set<string>());
   const loadMonth = useCallback(
@@ -437,7 +425,6 @@ export function BookingFlow(props: BookingFlowProps) {
           if (!res) throw new Error("no data");
           setSlots((s) => ({ ...s, ...res.slots }));
           setLoad((l) => ({ ...l, ...res.load }));
-          setQueueCounts((q) => ({ ...q, ...res.queueCounts }));
         })
         .catch(() => {
           asked.current.delete(month); // let the next visit to this month retry
@@ -500,17 +487,8 @@ export function BookingFlow(props: BookingFlowProps) {
   const [note, setNote] = useState("");
   const [urgent, setUrgent] = useState(false);
 
-  /* the no-fixed-time queue for a full day: joining instead of a time */
-  const [queueMode, setQueueMode] = useState(false);
-  const [queuedRef, setQueuedRef] = useState<string | null>(null);
-  const queueLeft = useCallback(
-    (iso: string) => !resched && dayQueueMax > 0 && (queueCounts[iso] ?? 0) < dayQueueMax,
-    [resched, dayQueueMax, queueCounts],
-  );
-  const hoursOf = (iso: string) => openDays.find((d) => d.day === weekday(iso));
-  const fillHours = (text: string, iso: string) =>
-    text.replace("{start}", hoursOf(iso)?.start ?? "").replace("{end}", hoursOf(iso)?.end ?? "");
-
+  /** the server refused the LINE sign-in (e.g. it expired) — offer a fresh one */
+  const [lineErr, setLineErr] = useState(false);
   const chosen = dentist ? dentists.find((d) => d.slug === dentist) : undefined;
   const roster = treatment ? dentistsForUI(dentists, treatment, group) : dentists;
   /** the picked treatment's length — a 1-hour one holds two half-hour slots */
@@ -556,6 +534,15 @@ export function BookingFlow(props: BookingFlowProps) {
 
   /** picking a time reserves it server-side for HOLD_MINUTES — if the slot was
    *  just taken, unselect and say so rather than failing at confirm */
+  /** a different treatment, dentist or group changes which days and times
+   *  exist — the old pick must not carry over */
+  function resetSlot() {
+    clearHold();
+    setDate(null);
+    setTime(null);
+    setBookErr(null);
+  }
+
   function pickTime(hhmm: string) {
     clearHold();
     setTime(hhmm);
@@ -583,14 +570,13 @@ export function BookingFlow(props: BookingFlowProps) {
   }
 
   function pickTreatment(k: TreatmentKey) {
-    clearHold();
+    if (k !== treatment) resetSlot();
+    else clearHold();
     setTreatment(k);
     // a dentist picked for the previous treatment may not take this one —
     // drop back to the dentist step instead of showing an empty calendar
     if (dentist && !dentistsForUI(dentists, k, group).some((d) => d.slug === dentist)) {
       setDentist(undefined);
-      setDate(null);
-      setTime(null);
       setStep(2);
       return;
     }
@@ -600,10 +586,8 @@ export function BookingFlow(props: BookingFlowProps) {
   /** the first answer: kid or adult. A treatment or dentist carried in from
    *  a link stays only if it fits the group. */
   function pickGroup(g: AgeGroup) {
-    clearHold();
+    resetSlot();
     setPickedGroup(g);
-    setDate(null);
-    setTime(null);
     const t = treatment && dentistsForUI(dentists, treatment, g).length > 0 ? treatment : null;
     const keepDentist =
       t && dentist !== undefined && (dentist === null || dentistsForUI(dentists, t, g).some((d) => d.slug === dentist));
@@ -619,7 +603,8 @@ export function BookingFlow(props: BookingFlowProps) {
   }
 
   function pickDentist(slug: string | null) {
-    clearHold();
+    if (slug !== dentist) resetSlot();
+    else clearHold();
     setDentist(slug);
     setStep(3);
   }
@@ -666,6 +651,7 @@ export function BookingFlow(props: BookingFlowProps) {
         saveContact(bookName.trim(), contactTel);
         setConfirmedRef(result.ref);
       } else {
+        setLineErr(result.error === "line");
         setBookErr(
           result.error === "slot_taken" ? t.booking.slotTaken
           : result.error === "line" ? t.booking.errLine
@@ -673,46 +659,6 @@ export function BookingFlow(props: BookingFlowProps) {
           : t.booking.bookError,
         );
       }
-    });
-  }
-
-  /** the full day's queue instead of a time — name + phone checked the same way */
-  function confirmQueue() {
-    if (!treatment || !date || !group) return;
-    if (!bookName.trim()) {
-      setContactErr(t.booking.errName);
-      return;
-    }
-    if (!/^[0-9]{9,10}$/.test(contactTel.replace(/\D/g, ""))) {
-      setContactErr(t.booking.errTel);
-      return;
-    }
-    setContactErr(null);
-    setBookErr(null);
-    startBooking(async () => {
-      // one place per LINE account per day on the server, so a retry is safe
-      const result = await joinDayQueue({
-        date,
-        treatmentKey: treatment,
-        ageGroup: group,
-        childName: bookName.trim(),
-        phone: contactTel,
-        note,
-        urgent,
-        lineIdToken: line.token ?? undefined,
-      }).catch((): DayQueueResult | null => null);
-      if (result?.ok) {
-        saveContact(bookName.trim(), contactTel);
-        setQueuedRef(result.ref);
-        return;
-      }
-      setBookErr(
-        result === null ? t.booking.errNetwork
-        : result.error === "full" ? t.booking.queueFull
-        : result.error === "closed" ? t.booking.queueClosed
-        : result.error === "line" ? t.booking.errLine
-        : t.booking.bookError,
-      );
     });
   }
 
@@ -753,32 +699,7 @@ export function BookingFlow(props: BookingFlowProps) {
 
   return (
     <Screen title={`${t.book} · ${title}`} back="/">
-      {queuedRef && treatment && date ? (
-        <div className="doneWrap">
-          <div className="doneArt">
-            <Mascot h={96} id="done" />
-            <span className="doneTick">
-              <Check size={18} />
-            </span>
-          </div>
-          <h2 className="doneTitle">{t.booking.queueDoneTitle}</h2>
-          <p className="doneSub">{fillHours(t.booking.queueDoneSub, date)}</p>
-          <div className="queueSlip">
-            <span className="qsK">{t.booking.queueRef}</span>
-            <span className="qsRef">{queuedRef}</span>
-            <span className="qsV">
-              {fmtRelative(t, today, date)} · {t.booking.queueNoTime}
-            </span>
-            <span className="qsV">
-              {bookName.trim()} · {tr.name(treatment)}
-            </span>
-          </div>
-          <div className="doneLinks">
-            <Cta href="/bookings">{t.booking.viewBookings}</Cta>
-            <Ghost href="/">{t.booking.backHome}</Ghost>
-          </div>
-        </div>
-      ) : booked && treatment && date && time ? (
+      {booked && treatment && date && time ? (
         <div className="doneWrap">
           <div className="doneArt">
             <Mascot h={96} id="done" />
@@ -963,14 +884,12 @@ export function BookingFlow(props: BookingFlowProps) {
                 nowMin={nowMin}
                 leadMin={leadMin}
                 windowDays={windowDays}
-                queueLeft={queueLeft}
                 onMonth={loadMonth}
                 date={date}
                 onPick={(iso) => {
                   clearHold();
                   setDate(iso);
                   setTime(null);
-                  setQueueMode(false);
                 }}
                 openDays={openDays}
                 holidays={holidays}
@@ -1002,27 +921,7 @@ export function BookingFlow(props: BookingFlowProps) {
                       <SlotBank label={t.booking.afternoon} times={daySlots.afternoon} time={time} onPick={pickTime} />
                     ) : null}
                     {daySlots.morning.length === 0 && daySlots.afternoon.length === 0 ? (
-                      queueLeft(date) ? (
-                        <div className="queueOffer">
-                          <strong>{t.booking.fullDayTitle}</strong>
-                          <p>{fillHours(t.booking.fullDayQueueSub, date)}</p>
-                          <button
-                            type="button"
-                            className="softBtn solid"
-                            onClick={() => {
-                              clearHold();
-                              setTime(null);
-                              setQueueMode(true);
-                              setBookErr(null);
-                              setStep(4);
-                            }}
-                          >
-                            {t.booking.joinQueue}
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="hint">{t.booking.fullDay}</p>
-                      )
+                      <p className="hint">{t.booking.fullDay}</p>
                     ) : null}
                     {time && holdToken ? <p className="hint">{t.booking.holdNote}</p> : null}
                   </div>
@@ -1110,6 +1009,11 @@ export function BookingFlow(props: BookingFlowProps) {
                 </label>
                 {contactErr ? <p className="err">{contactErr}</p> : null}
                 {bookErr ? <p className="err">{bookErr}</p> : null}
+                {lineErr ? (
+                  <button type="button" className="softBtn wide" onClick={line.relogin}>
+                    {t.booking.signInAgain}
+                  </button>
+                ) : null}
                 <p className="hint">{t.booking.contactHint}</p>
               </div>
 
@@ -1118,19 +1022,14 @@ export function BookingFlow(props: BookingFlowProps) {
                   <span className="sbK">{t.common.selected}</span>
                   <span className="sbV">
                     {date ? fmtRelative(t, today, date) : t.booking.pickDate}
-                    {queueMode ? ` · ${t.booking.queueNoTime}` : time ? ` · ${timeRange(time, durationMin)}` : ""}
+                    {time ? ` · ${timeRange(time, durationMin)}` : ""}
                   </span>
                 </div>
                 <button type="button" className="ghostBtn" onClick={() => setStep(3)}>
                   {t.booking.backToTime}
                 </button>
-                <button
-                  type="button"
-                  className="cta"
-                  onClick={queueMode ? confirmQueue : confirmBooking}
-                  disabled={pending || line.status !== "in"}
-                >
-                  {pending ? t.booking.bookingNow : queueMode ? t.booking.joinQueueBtn : t.booking.confirmBooking}
+                <button type="button" className="cta" onClick={confirmBooking} disabled={pending || line.status !== "in"}>
+                  {pending ? t.booking.bookingNow : t.booking.confirmBooking}
                 </button>
               </div>
             </>

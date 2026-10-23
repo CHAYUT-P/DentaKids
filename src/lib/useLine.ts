@@ -23,7 +23,7 @@ const DEV: LineState = { status: "in", token: "local-dev", name: null };
 /** outside LINE liff.init() has been seen to never settle — give up after this */
 const INIT_TIMEOUT_MS = 4000;
 
-export function useLine(): LineState & { login: () => void } {
+export function useLine(): LineState & { login: () => void; relogin: () => void } {
   const [state, setState] = useState<LineState>(LIFF_ID ? { status: "loading", token: null, name: null } : DEV);
 
   useEffect(() => {
@@ -64,5 +64,27 @@ export function useLine(): LineState & { login: () => void } {
     });
   }, []);
 
-  return { ...state, login };
+  /**
+   * The server refused the token (it expired while the page sat open): get a
+   * fresh one. Inside LINE, reopening the page issues a new token; in a
+   * browser, sign out and back in. Either way the family lands on this page.
+   */
+  const relogin = useCallback(() => {
+    if (!LIFF_ID) return;
+    void import("@line/liff").then(async ({ default: liff }) => {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+      } catch {
+        // already initialised, or LINE unreachable
+      }
+      if (liff.isInClient()) {
+        window.location.reload();
+        return;
+      }
+      if (liff.isLoggedIn()) liff.logout();
+      liff.login({ redirectUri: window.location.href });
+    });
+  }, []);
+
+  return { ...state, login, relogin };
 }

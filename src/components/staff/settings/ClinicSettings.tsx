@@ -11,7 +11,7 @@ import {
 } from "@/components/staff/shell/staffIcons";
 import { RangeCalendar, dayCount, fmtHolidayRange, fmtTHDate } from "@/components/staff/schedule/RangeCalendar";
 import { SystemStatus } from "@/components/staff/settings/SystemStatus";
-import { clampRule, hoursLabelTh, MAX_DAY_QUEUE, MAX_RULE_HOURS, WINDOW_CHOICES, windowLabelTh, type BookingRules } from "@/lib/bookingRules";
+import { clampRule, hoursLabelTh, MAX_RULE_HOURS, WINDOW_CHOICES, windowLabelTh, type BookingRules } from "@/lib/bookingRules";
 
 const DAY_LABELS: Record<DayKey, { th: string; en: string }> = {
   mon: { th: "วันจันทร์", en: "Monday" },
@@ -65,8 +65,8 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
       return rest;
     });
     const next = field === "start" ? { start: val, end } : { start, end: val };
-    if (!/^\d{2}:\d{2}$/.test(val) || next.start >= next.end) {
-      showToast("เวลาเปิด–ปิดไม่ถูกต้อง: เวลาเปิดต้องก่อนเวลาปิด — ยังไม่ได้บันทึก");
+    if (!/^\d{2}:(00|30)$/.test(val) || next.start >= next.end) {
+      showToast("เวลาเปิด–ปิดไม่ถูกต้อง: ใช้เวลาเต็มชั่วโมงหรือครึ่งชั่วโมง (เช่น 10:00, 10:30) และเวลาเปิดต้องก่อนเวลาปิด — ยังไม่ได้บันทึก");
       return;
     }
     if (val !== (field === "start" ? start : end)) updateDayTime(day, field, val);
@@ -80,19 +80,16 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   const [newHolidayName, setNewHolidayName] = useState("");
 
   // the booking rules staff set here: chairs and the online rules (window,
-  // book-before, cancel-before, day queue); the others are fixed, see below.
+  // book-before, cancel-before); the others are fixed, see below.
   // Hour boxes hold what's typed; saving keeps each inside its range.
   const [chairCount, setChairCount] = useState<number>(settings.chairs);
   const [windowDays, setWindowDays] = useState<number>(settings.windowDays);
   const [ruleText, setRuleText] = useState({
     leadHours: String(settings.leadHours),
     cancelHours: String(settings.cancelHours),
-    dayQueueMax: String(settings.dayQueueMax),
   });
-  const ruleBad = (k: keyof typeof ruleText) => {
-    const max = k === "dayQueueMax" ? MAX_DAY_QUEUE : MAX_RULE_HOURS;
-    return !/^\d+$/.test(ruleText[k].trim()) || Number(ruleText[k]) > max;
-  };
+  const ruleBad = (k: keyof typeof ruleText) =>
+    !/^\d+$/.test(ruleText[k].trim()) || Number(ruleText[k]) > MAX_RULE_HOURS;
 
   // the clinic's contact details, starting from what is saved — so saving
   // never puts demo values back
@@ -141,14 +138,14 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (activeTab === "booking") {
-      if ((["leadHours", "cancelHours", "dayQueueMax"] as const).some(ruleBad)) {
-        showToast(`ตัวเลขไม่ถูกต้อง: ชั่วโมงต้องเป็น 0–${MAX_RULE_HOURS}, คิวรอ 0–${MAX_DAY_QUEUE} — ยังไม่ได้บันทึก`);
+      if ((["leadHours", "cancelHours"] as const).some(ruleBad)) {
+        showToast(`ตัวเลขไม่ถูกต้อง: ชั่วโมงต้องเป็น 0–${MAX_RULE_HOURS} — ยังไม่ได้บันทึก`);
         return;
       }
       if (chairCount !== settings.chairs) updateChairs(chairCount);
       const patch: Partial<BookingRules> = {};
       if (windowDays !== settings.windowDays) patch.windowDays = windowDays;
-      for (const k of ["leadHours", "cancelHours", "dayQueueMax"] as const) {
+      for (const k of ["leadHours", "cancelHours"] as const) {
         const v = clampRule(k, ruleText[k].trim());
         if (v !== settings[k]) patch[k] = v;
       }
@@ -276,6 +273,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                         <span style={{ fontSize: "12px", color: "var(--staff-ink-muted)" }}>เวลา:</span>
                         <input
                           type="time"
+                          step={1800}
                           className="form-control"
                           style={{ padding: "4px 8px", width: "110px", fontSize: "13px" }}
                           value={timeDraft[`${item.day}:start`] ?? item.start}
@@ -285,6 +283,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                         <span style={{ fontSize: "12px", color: "var(--staff-ink-muted)" }}>ถึง</span>
                         <input
                           type="time"
+                          step={1800}
                           className="form-control"
                           style={{ padding: "4px 8px", width: "110px", fontSize: "13px" }}
                           value={timeDraft[`${item.day}:end`] ?? item.end}
@@ -491,12 +490,6 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                     unit: "ชั่วโมงก่อนนัด",
                     hint: "0 = ได้จนถึงเวลานัด · หลังจากนั้นหน้าเว็บให้โทรหาคลินิกแทน (เจ้าหน้าที่ยังเลื่อน/ยกเลิกได้เสมอ)",
                   },
-                  {
-                    k: "dayQueueMax",
-                    label: "คิวรอไม่ระบุเวลา (วันที่จองเต็ม) รับได้วันละ",
-                    unit: "คน",
-                    hint: "0 = ไม่เปิดรับ · ผู้ปกครองลงชื่อมารอคิวในวันนั้นได้ จะขึ้นในหน้า “วันนี้” ของวันนั้น",
-                  },
                 ] as const
               ).map((r) => (
                 <div className="form-group" key={r.k}>
@@ -548,15 +541,6 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                   ผู้ปกครอง<strong>เลื่อน/ยกเลิกนัดเองได้</strong>ทาง LINE
                   {settings.cancelHours > 0 ? ` จนถึง ${hoursLabelTh(settings.cancelHours)} ก่อนนัด (หลังจากนั้นโทรหาคลินิก)` : " จนถึงเวลานัด"}
                   {" "}— ยกเลิกแล้วได้ข้อความยืนยันทาง LINE
-                </li>
-                <li>
-                  {settings.dayQueueMax > 0 ? (
-                    <>
-                      วันที่จองเต็ม ผู้ปกครอง<strong>ลงชื่อรอคิวแบบไม่ระบุเวลา</strong>ได้วันละไม่เกิน <strong>{settings.dayQueueMax} คน</strong>
-                    </>
-                  ) : (
-                    "ไม่เปิดคิวรอแบบไม่ระบุเวลา"
-                  )}
                 </li>
                 <li>
                   จองแล้ว<strong>ยืนยันทันที</strong> ได้รหัสจองและข้อความยืนยันทาง LINE

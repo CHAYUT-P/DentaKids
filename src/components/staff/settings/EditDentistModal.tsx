@@ -586,6 +586,7 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
                             <div className="de-times">
                               <input
                                 type="time"
+                                step={1800}
                                 className="form-control"
                                 value={s.start}
                                 onChange={(e) => {
@@ -596,6 +597,7 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
                               <span>ถึง</span>
                               <input
                                 type="time"
+                                step={1800}
                                 className="form-control"
                                 value={s.end}
                                 onChange={(e) => {

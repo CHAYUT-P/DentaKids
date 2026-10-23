@@ -24,6 +24,11 @@ async function main() {
     else { failed++; console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`); }
   };
 
+  // start from the default booking rules (a run that stopped early could
+  // have left test values), and put the clinic's own back at the end
+  const rulesAtStart = await queries.getBookingRules();
+  await actions.staffUpdateBookingRules({ windowDays: 14, leadHours: 1, cancelHours: 0 });
+
   console.log("\n— 1. Parent books online (new family) —");
   // find a day naree works, next week
   let date = addDays(today, 7);
@@ -258,7 +263,7 @@ async function main() {
   ok("older history loads separately, only before that date", older.every((a) => a.date < boot.appointmentsFrom));
 
   console.log("\n— 11. Book-before, cancel-before, cancel message —");
-  const rulesBefore = await queries.getBookingRules();
+  const rulesBefore = rulesAtStart;
   await actions.staffUpdateBookingRules({ windowDays: 30, leadHours: 1, cancelHours: 0 });
   let soonDay = addDays(today, 1);
   while (![2, 3, 5, 6].includes(weekdayIndex(soonDay))) soonDay = addDays(soonDay, 1);
@@ -295,38 +300,43 @@ async function main() {
   ok("cancel-before 0: now they can", (await actions.cancelBooking(soonOk.ref!, FAMILY)).ok);
   ok("rules stay in range", (await actions.staffUpdateBookingRules({ leadHours: 9999, cancelHours: -5 })).leadHours === 168);
 
-  console.log("\n— 12. Day queue (full day, no fixed time) —");
-  const days = await queries.listClinicDays();
-  const { weekday: dayKey } = await import("../src/lib/dates");
-  let qDay = addDays(today, 2);
-  while (!days.find((d) => d.day === dayKey(qDay))?.isOpen) qDay = addDays(qDay, 1);
-  await actions.staffUpdateBookingRules({ dayQueueMax: 2 });
-  const qBase = { date: qDay, treatmentKey: "checkup" as const, ageGroup: "kid" as const, phone: "0933333333" };
-  const q1 = await actions.joinDayQueue({ ...qBase, childName: "e2e-q1", lineIdToken: "e2e-q-fam1", urgent: true });
-  ok("a family joins the day's queue", q1.ok && q1.ref.startsWith("Q-"), JSON.stringify(q1));
-  const q1again = await actions.joinDayQueue({ ...qBase, childName: "e2e-q1", lineIdToken: "e2e-q-fam1" });
-  ok("joining again gives the same place", q1again.ok && q1.ok && q1again.ref === q1.ref && q1again.already);
-  const q2 = await actions.joinDayQueue({ ...qBase, childName: "e2e-q2", lineIdToken: "e2e-q-fam2" });
-  const q3 = await actions.joinDayQueue({ ...qBase, childName: "e2e-q3", lineIdToken: "e2e-q-fam3" });
-  ok("the clinic's cap (2) holds", q2.ok && !q3.ok && q3.error === "full", JSON.stringify(q3));
-  const boot2 = await actions.staffBootstrap();
-  ok("staff see the sign-ups", boot2.dayQueue.filter((x) => x.visitDate === qDay && x.childName.startsWith("e2e-q")).length === 2);
-  const myQueue = await actions.myDayQueueByLine("e2e-q-fam1");
-  ok("the family sees theirs in my bookings", myQueue?.some((x) => x.ref === (q1.ok ? q1.ref : "")) === true);
-  ok("someone else can't cancel it", !(await actions.cancelDayQueueEntry(q1.ok ? q1.ref : "", "e2e-q-fam2")).ok);
-  ok("the family cancels", (await actions.cancelDayQueueEntry(q1.ok ? q1.ref : "", "e2e-q-fam1")).ok);
-  const q3b = await actions.joinDayQueue({ ...qBase, childName: "e2e-q3", lineIdToken: "e2e-q-fam3" });
-  ok("a freed place can be taken", q3b.ok);
-  const q2row = boot2.dayQueue.find((x) => x.childName === "e2e-q2")!;
-  await actions.staffSetDayQueueStatus(q2row.id, "waiting");
-  const { db: qdb } = await import("../src/db/client");
-  const { waitlistEntry: wl2 } = await import("../src/db/schema");
-  const { eq: qeq } = await import("drizzle-orm");
-  const [arrivedRow] = await qdb.select().from(wl2).where(qeq(wl2.id, q2row.id));
-  ok("the desk ticks one in: it becomes a walk-in with an arrival time", arrivedRow.status === "waiting" && /^\d{2}:\d{2}$/.test(arrivedRow.arrivedAt));
-  // leave no test sign-ups behind, and the rules as they were
-  const { like: qlike } = await import("drizzle-orm");
-  await qdb.delete(wl2).where(qlike(wl2.childName, "e2e-q%"));
+  console.log("\n— 12. Settings stay on the half-hour grid; restoring a booking is guarded —");
+  const daysNow = await queries.listClinicDays();
+  const openDayRow = daysNow.find((d) => d.isOpen)!;
+  let threw = false;
+  try { await actions.staffUpdateDay(openDayRow.day, { start: "08:45" }); } catch { threw = true; }
+  ok("an opening time like 08:45 is refused", threw);
+  ok("…and nothing was saved", (await queries.listClinicDays()).find((d) => d.day === openDayRow.day)?.start === openDayRow.start);
+  const nareeNow = (await queries.listDentists()).find((d) => d.slug === "naree")!;
+  threw = false;
+  try {
+    await actions.staffUpdateDentist("naree", { shifts: [{ weekday: 2, enabled: true, start: "09:15", end: "17:00" }] });
+  } catch { threw = true; }
+  ok("a shift starting 09:15 is refused", threw);
+  ok("…and naree's shifts are unchanged", JSON.stringify((await queries.listDentists()).find((d) => d.slug === "naree")!.shifts) === JSON.stringify(nareeNow.shifts));
+  // a cancelled booking whose time was taken since can't simply come back
+  // the first day ahead with a free time for naree
+  let rDay = addDays(today, 3);
+  let rTime: string | undefined;
+  for (let i = 0; i < 30 && !rTime; i++, rDay = addDays(rDay, 1)) {
+    rTime = (await queries.slotsForDate(rDay)).filter((x) => !x.taken && x.dentistSlug === "naree").map((x) => x.time).sort()[0];
+    if (rTime) break;
+  }
+  ok("found a free time for the restore test", !!rTime, rDay);
+  if (!rTime) process.exit(1);
+  const first = await actions.staffCreateAppointment({ date: rDay, time: rTime, treatmentKey: "checkup", dentistId: naree.id, childName: "คืนนัด-1", guardianName: "x", phone: "0955555555", source: "phone" });
+  const firstId = (await queries.listAppointmentsBetween(rDay, rDay)).find((a) => a.ref === first)?.id ?? -1;
+  await actions.staffUpdateAppointment(firstId, { status: "cancelled" });
+  await actions.staffCreateAppointment({ date: rDay, time: rTime, treatmentKey: "checkup", dentistId: naree.id, childName: "คืนนัด-2", guardianName: "x", phone: "0955555556", source: "phone" });
+  threw = false;
+  try { await actions.staffUpdateAppointment(firstId, { status: "confirmed" }); } catch { threw = true; }
+  ok("restoring a cancelled booking into a taken time is refused", threw);
+  const atSlot = (await queries.listAppointmentsBetween(rDay, rDay)).filter((a) => a.time === rTime && a.dentistSlug === "naree" && a.status !== "cancelled");
+  ok("…the dentist still has one booking at that time", atSlot.length === 1);
+  for (const a of await queries.listAppointmentsBetween(rDay, rDay)) {
+    if (a.childName.startsWith("คืนนัด")) await queries.deleteAppointment(a.id);
+  }
+
   await actions.staffUpdateBookingRules(rulesBefore);
 
   console.log(`\n═══ ${passed} passed, ${failed} failed ═══\n`);
