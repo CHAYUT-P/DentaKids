@@ -51,7 +51,7 @@ Clinic PC (Denta Kids Staff, any screen, on open + every 3 hours)
 2. **Make the signing key** on your own computer. It asks for a password:
    choose one and keep it.
    ```bash
-   pnpm --dir apps/staff-desktop tauri signer generate -w ~/.tauri/dentakids-updater.key
+   cd apps/staff-desktop && npx tauri signer generate -w ~/.tauri/dentakids-updater.key
    ```
    **Back up `~/.tauri/dentakids-updater.key` and the password** (a password
    manager, or a USB stick kept at home). If they are lost, PCs can't accept
