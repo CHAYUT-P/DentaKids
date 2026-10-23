@@ -17,10 +17,10 @@ staff screen needed someone to download and reinstall the app on every PC.
 GitHub Actions (Run workflow, with "what changed")
   → builds the Windows installer, signs the update with our private key
   → publishes it to the PUBLIC repo CHAYUT-P/DentaKids-releases (Releases)
-  → writes <edition>/latest.json there: "newest is 0.1.N, download here, signature …"
+  → writes stable/latest.json there: "newest is 0.1.N, download here, signature …"
 
 Clinic PC (Denta Kids Staff, any screen, on open + every 3 hours)
-  → reads queue/latest.json (or full/latest.json)
+  → reads stable/latest.json
   → newer than me? → corner card: "มีเวอร์ชันใหม่ 0.1.N — <what changed>"
   → staff tap อัปเดตตอนนี้ → download → signature checked against the public
     key inside the app → install (Windows, passive) → app reopens
@@ -30,9 +30,11 @@ Clinic PC (Denta Kids Staff, any screen, on open + every 3 hours)
   patient. "ภายหลัง" hides the card until the next check, a few hours later.
 - **Signed.** The app only installs a file signed with our private key, so
   nobody can push a fake update by tampering with the download.
-- **Two channels.** The queue and full editions read different files, so a
-  full-edition PC can never "update" into the queue edition.
-- **Rollback.** Point `<edition>/latest.json` in the releases repo back at
+- **One app for both editions.** The app carries every screen; the server
+  says which edition the clinic uses (`STAFF_EDITION` on the VPS). Moving to
+  the full edition later is one line on the server and a restart, with no new
+  build and no visit to the clinic.
+- **Rollback.** Point `stable/latest.json` in the releases repo back at
   the previous version's `latest.json` (each release keeps its own). PCs that
   haven't updated stay where they are. PCs that already updated need the old
   installer run by hand: an updater never goes backwards.
@@ -85,7 +87,7 @@ DentaKids-releases → Releases. That's the last manual install.
 ## Releasing an update
 
 ```bash
-gh workflow run staff-app-windows.yml -f edition=queue -f notes="แก้ปุ่มเช็คอินกดไม่ติด"
+gh workflow run staff-app-windows.yml -f notes="แก้ปุ่มเช็คอินกดไม่ติด"
 ```
 
 Or use GitHub → Actions → *Staff app (Windows)* → Run workflow. It takes about

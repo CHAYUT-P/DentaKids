@@ -39,7 +39,7 @@ pnpm dev                      # website + backend on http://localhost:3000
 pnpm db:push                  # apply schema changes to the database in .env
 pnpm e2e:test                 # booking flow end to end
 pnpm concurrency:test         # 30 simultaneous bookings/payments: no doubles
-pnpm --dir apps/staff-desktop dev:app:full   # staff app (full edition) against :3000
+pnpm --dir apps/staff-desktop dev:app       # staff app; edition = STAFF_EDITION of the server it talks to
 pnpm deploy:vps root@<ip>     # deploy / update the VPS (see docs/DEPLOYMENT.md)
 ```
 

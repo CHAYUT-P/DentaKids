@@ -1,11 +1,12 @@
 import type { StaffEdition } from "@/lib/staffTypes";
 
 /**
- * Which feature bundle this build carries, stamped at compile time:
- *   pnpm build            → "queue"  (queue + bookings + website content)
- *   pnpm build:full       → "full"   (+ patient records + room pages)
+ * Every build carries both editions' screens; the server decides which one a
+ * clinic sees (`edition` in the bootstrap, from STAFF_EDITION on the server).
+ * This is only the fallback for a server too old to say: "queue", or "full"
+ * for a local preview started with `vite --mode full`.
  * Vite's `define` swaps __STAFF_EDITION__ for a string literal; without it
- * (plain `vite` dev) the typeof check keeps this from throwing.
+ * the typeof check keeps this from throwing.
  */
 declare const __STAFF_EDITION__: string | undefined;
 

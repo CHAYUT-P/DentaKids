@@ -96,10 +96,14 @@ function Screens() {
     );
   }
 
+  // one app for both editions: the server says which screens this clinic uses
+  // (an older server doesn't say — then this build's own default)
+  const edition = initial.edition ?? STAFF_EDITION;
+
   return (
     <CrashScreen>
     <LangProvider>
-      <StaffProvider initial={initial} edition={STAFF_EDITION}>
+      <StaffProvider initial={initial} edition={edition}>
         <HashRouter>
           <StaffUserGate>
           <DeviceGate>
@@ -111,7 +115,7 @@ function Screens() {
                   <Route path="/" element={<TodayPage />} />
                   <Route path="/schedule" element={<ScheduleView />} />
                   <Route path="/settings" element={<SetupView patientWebUrl={API_BASE} />} />
-                  {STAFF_EDITION === "full" ? (
+                  {edition === "full" ? (
                     <>
                       <Route path="/patients" element={<PatientsPage />} />
                       <Route path="/rooms" element={<RoomsRoute />} />

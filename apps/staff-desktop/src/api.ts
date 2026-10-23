@@ -143,6 +143,9 @@ export interface StaffBootstrap {
   settings: { chairs: number; windowDays: number; leadHours: number; cancelHours: number; dayQueueMax: number };
   /** website sign-ups for full days, still expected (today and later) */
   dayQueue: DayQueueDTO[];
+  /** which screens to show — the server decides (STAFF_EDITION). A server
+   *  older than this field leaves it out; App.tsx falls back then. */
+  edition: "queue" | "full";
   clinicInfo: {
     phone: string;
     phoneDisplay: string;

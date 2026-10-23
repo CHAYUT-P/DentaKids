@@ -2,13 +2,16 @@
 # and makes it the version clinic PCs update to (docs/design/07-auto-update.md).
 #
 # Run it from GitHub → Actions → "Staff app (Windows)" → Run workflow, or with
-#   gh workflow run staff-app-windows.yml -f edition=queue -f notes="what changed"
+#   gh workflow run staff-app-windows.yml -f notes="what changed"
+#
+# One app for both editions: which screens a clinic sees is STAFF_EDITION on
+# the server, so moving to the full edition needs no new build or install.
 #
 # This repository is private, so installers go to the public repository
 # CHAYUT-P/DentaKids-releases (installers only — no code, no secrets: no PIN
 # is baked in; the app asks for the clinic PIN the first time on each PC).
-# Every PC already installed checks <edition>/latest.json there and offers
-# the update; a new PC downloads the .exe from that repository's Releases.
+# Every PC already installed checks stable/latest.json there and offers the
+# update; a new PC downloads the .exe from that repository's Releases.
 #
 # Needs three secrets in this repository (one-time setup, see design/07):
 #   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD — signs updates
@@ -18,11 +21,6 @@ name: Staff app (Windows)
 on:
   workflow_dispatch:
     inputs:
-      edition:
-        description: "Which edition to build"
-        type: choice
-        options: [queue, full]
-        default: queue
       notes:
         description: "What changed (shown to staff in the update bar)"
         type: string
@@ -34,7 +32,9 @@ permissions:
 env:
   RELEASES_REPO: DentaKids-releases
   VERSION: 0.1.${{ github.run_number }}
-  TAG: staff-windows-${{ inputs.edition }}-${{ github.run_number }}
+  TAG: staff-windows-${{ github.run_number }}
+  # the update channel installed PCs read
+  CHANNEL: stable
 
 jobs:
   windows:
@@ -66,15 +66,11 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            for (const f of ["apps/staff-desktop/src-tauri/tauri.conf.json", "apps/staff-desktop/src-tauri/tauri.full.conf.json"]) {
-              if (!fs.existsSync(f)) continue;
-              const c = JSON.parse(fs.readFileSync(f, "utf8"));
-              if (c.version) c.version = process.env.VERSION;
-              if (f.endsWith("tauri.conf.json") && !f.includes(".full.")) {
-                c.bundle = { ...c.bundle, createUpdaterArtifacts: true };
-              }
-              fs.writeFileSync(f, JSON.stringify(c, null, 2));
-            }
+            const f = "apps/staff-desktop/src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(f, "utf8"));
+            c.version = process.env.VERSION;
+            c.bundle = { ...c.bundle, createUpdaterArtifacts: true };
+            fs.writeFileSync(f, JSON.stringify(c, null, 2));
           '
 
       - name: Build, sign and publish the installer
@@ -86,32 +82,30 @@ jobs:
         with:
           projectPath: apps/staff-desktop
           tauriScript: pnpm tauri
-          args: ${{ inputs.edition == 'full' && '--bundles nsis --config src-tauri/tauri.full.conf.json' || '--bundles nsis' }}
+          args: --bundles nsis
           owner: CHAYUT-P
           repo: ${{ env.RELEASES_REPO }}
           releaseCommitish: main
           tagName: ${{ env.TAG }}
-          releaseName: "Denta Kids Staff (Windows, ${{ inputs.edition }}) ${{ env.VERSION }}"
+          releaseName: "Denta Kids Staff (Windows) ${{ env.VERSION }}"
           releaseBody: |
             ${{ inputs.notes }}
 
-            Windows installer for the staff app (${{ inputs.edition }} edition). PCs that already have the app update themselves.
+            Windows installer for the staff app. PCs that already have the app update themselves.
             New PC: download the `.exe` below, run it, and open "Denta Kids Staff" from the Start menu.
             Windows may warn "Windows protected your PC" because the app isn't signed with a paid certificate — choose "More info" → "Run anyway".
             The first time it opens, type the clinic PIN.
           includeUpdaterJson: true
           releaseDraft: false
-          # only the queue edition shows as "Latest" on the Releases page
-          prerelease: ${{ inputs.edition == 'full' }}
+          prerelease: false
 
-      # what installed PCs read: <edition>/latest.json on the releases repo's
+      # what installed PCs read: stable/latest.json on the releases repo's
       # main branch. Pointing it back at an older version's file is the
       # rollback for a bad release.
       - name: Offer this version to the clinic PCs
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          EDITION: ${{ inputs.edition }}
           NOTES: ${{ inputs.notes }}
         run: |
           gh release download "$TAG" -R "CHAYUT-P/$RELEASES_REPO" -p latest.json -D upd
@@ -123,11 +117,11 @@ jobs:
             fs.writeFileSync("upd/latest.json", JSON.stringify(j, null, 2));
           '
           git clone "https://x-access-token:${GH_TOKEN}@github.com/CHAYUT-P/${RELEASES_REPO}.git" rel
-          mkdir -p "rel/$EDITION"
-          cp upd/latest.json "rel/$EDITION/latest.json"
+          mkdir -p "rel/$CHANNEL"
+          cp upd/latest.json "rel/$CHANNEL/latest.json"
           cd rel
           git config user.name "dentakids-release"
           git config user.email "dentakids-release@users.noreply.github.com"
-          git add "$EDITION/latest.json"
-          git commit -m "$EDITION: offer $VERSION"
+          git add "$CHANNEL/latest.json"
+          git commit -m "$CHANNEL: offer $VERSION"
           git push

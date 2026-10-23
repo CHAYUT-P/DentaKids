@@ -1731,6 +1731,9 @@ export async function staffBootstrap() {
     settings: { chairs, ...bookingRules },
     /** website sign-ups for full days, still expected (today and later) */
     dayQueue,
+    /** which screens every staff app shows — STAFF_EDITION on the server, so
+     *  the clinic moves to the full edition without reinstalling anything */
+    edition: (process.env.STAFF_EDITION === "full" ? "full" : "queue") as "queue" | "full",
     /** the clinic's saved contact details — the settings form starts from these */
     clinicInfo,
     /** the change number this data is current to (live updates, design/04) */

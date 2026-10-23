@@ -2,17 +2,14 @@
   "name": "staff-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Denta Kids staff console — standalone desktop app (bundled UI, calls /api/staff)",
+  "description": "Denta Kids staff console \u2014 standalone desktop app (bundled UI, calls /api/staff)",
   "scripts": {
     "dev": "vite",
     "dev:full": "vite --mode full",
     "dev:app": "tauri dev",
-    "dev:app:full": "tauri dev --config src-tauri/tauri.full.conf.json",
     "build": "vite build",
-    "build:full": "vite build --mode full",
     "typecheck": "tsc --noEmit",
-    "build:app": "tauri build",
-    "build:app:full": "tauri build --config src-tauri/tauri.full.conf.json"
+    "build:app": "tauri build"
   },
   "dependencies": {
     "@fontsource/mitr": "^5.3.0",

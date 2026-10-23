@@ -86,17 +86,20 @@ Mock appointments are stored as an offset in days from today, so they never rot;
 - **Settings**: opening hours, holidays, slot rules, staff accounts and roles.
 - **Out of scope for the queue edition**: billing, clinical charting, X-ray/imaging, stock. The full edition is growing into the whole clinic system (billing is in; charting, stock and reports follow), replacing the clinic's current program (FD by 9net) one part at a time.
 
-### Editions — same codebase, two builds
+### Editions — one app, the server decides
 
 | | **Queue** (first install) | **Full** |
 | --- | --- | --- |
 | Scope | queue, bookings, dentist + treatment + clinic content | everything in Queue, plus patient records, per-dentist room pages and การเงิน (bills, receipts, DF, day close) |
-| Desktop build | `pnpm --dir apps/staff-desktop build:app` | `pnpm --dir apps/staff-desktop build:app:full` (merges `src-tauri/tauri.full.conf.json`) |
-| Web console | default | `STAFF_EDITION=full` on the deploy |
+| Server | `STAFF_EDITION=queue` (default) | `STAFF_EDITION=full` |
 
-- The flag travels as `edition` on `StaffProvider`: desktop stamps it via
-  `vite --mode full` → `__STAFF_EDITION__` → `src/edition.ts`; the web layout
-  reads `STAFF_EDITION`. Components check `edition` from `useStaff()`.
+- **One desktop app** (`pnpm --dir apps/staff-desktop build:app`) carries both
+  editions' screens. The server sends `edition` in the staff bootstrap (from
+  `STAFF_EDITION`), so moving the clinic to the full edition is one line on
+  the VPS and a restart: no reinstall, every PC follows on its next refresh.
+  The web console reads the same variable. Components check `edition` from
+  `useStaff()`. `src/edition.ts` is only the fallback for an older server
+  (`vite --mode full` makes a local preview default to full).
 - **Room mode** is a per-device localStorage switch (Settings → หน้าจอเครื่องนี้,
   full only): a treatment-room PC locks onto one dentist's page
   (`/staff/rooms/[slug]` web, `#/rooms/:slug` desktop) — its waiting line plus
