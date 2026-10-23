@@ -13,7 +13,8 @@ import { isIconKey } from "@/data/icons";
 import { addDays, minutesOf, todayISO, weekday, weekdayIndex } from "@/lib/dates";
 import { agesAllow, isAgeGroup, isTreatAges, type AgeGroup, type TreatAges } from "@/lib/ageGroup";
 import { coveredTimes, SLOT_MIN } from "@/lib/slots";
-import { clampWindowDays, DEFAULT_WINDOW_DAYS } from "@/lib/bookingWindow";
+import { clampRule, DEFAULT_RULES, RULE_KEYS, type BookingRules } from "@/lib/bookingRules";
+import { isUrgent } from "@/lib/urgent";
 import { newTreatmentKey, toTreatmentInfo, type TreatmentInfo, type TreatmentKey } from "@/lib/treatments";
 import type { PatientChildInput, PatientUpsertInput, VisitItem } from "@/lib/staffTypes";
 /**
@@ -193,6 +194,22 @@ export interface WaitlistDTO {
   arrivedAt: string;
   status: "waiting" | "in_chair" | "done";
   note: string;
+}
+
+/** a website sign-up for a full day's queue (no fixed time) */
+export interface DayQueueDTO {
+  id: number;
+  ref: string;
+  visitDate: string;
+  childName: string;
+  phone: string;
+  treatmentKey: TreatmentKey;
+  ageGroup: AgeGroup | null;
+  lineName: string;
+  note: string;
+  /** "expected" until the desk ticks them in; then it is a walk-in */
+  status: "expected" | "waiting" | "in_chair" | "done" | "cancelled";
+  createdAt: string;
 }
 
 export interface NotificationDTO {
@@ -589,14 +606,6 @@ export async function slotsForDates(dates: string[], excludeId?: number): Promis
   return out;
 }
 
-/** does any active dentist still have a free 30-min slot on this date? */
-export async function dateHasRoom(date: string, today: string, nowMin: number): Promise<boolean> {
-  if (date < today) return false;
-  const slots = await slotsForDate(date);
-  const leadMin = date === today ? nowMin + 60 : -1;
-  return slots.some((s) => !s.taken && minutesOf(s.time) > leadMin);
-}
-
 /* ═══════════════════════════════ pool ("any dentist") ════════════════════ */
 /**
  * Pooled bookings are appointments with dentist_id NULL: the parent picked a
@@ -620,19 +629,34 @@ export async function getChairs(q: Pick<typeof db, "select"> = db): Promise<numb
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
 }
 
-/** how many days ahead families may book on the website (src/lib/bookingWindow.ts) */
-export async function getBookingWindowDays(q: Pick<typeof db, "select"> = db): Promise<number> {
-  const rows = await q.select().from(clinicSetting).where(eq(clinicSetting.key, "booking_window_days"));
-  return rows[0] ? clampWindowDays(rows[0].value) : DEFAULT_WINDOW_DAYS;
+/** the clinic's online-booking rules (src/lib/bookingRules.ts), defaults where unset */
+export async function getBookingRules(q: Pick<typeof db, "select"> = db): Promise<BookingRules> {
+  const names = Object.values(RULE_KEYS);
+  const rows = await q.select().from(clinicSetting).where(inArray(clinicSetting.key, names));
+  const saved = new Map(rows.map((r) => [r.key, r.value]));
+  const out = { ...DEFAULT_RULES };
+  for (const k of Object.keys(RULE_KEYS) as (keyof BookingRules)[]) {
+    if (saved.has(RULE_KEYS[k])) out[k] = clampRule(k, saved.get(RULE_KEYS[k]));
+  }
+  return out;
 }
 
-export async function setBookingWindowDays(n: number): Promise<number> {
-  const days = clampWindowDays(n);
-  await db
-    .insert(clinicSetting)
-    .values({ key: "booking_window_days", value: String(days) })
-    .onConflictDoUpdate({ target: clinicSetting.key, set: { value: String(days), updatedAt: new Date() } });
-  return days;
+/** how many days ahead families may book on the website */
+export async function getBookingWindowDays(q: Pick<typeof db, "select"> = db): Promise<number> {
+  return (await getBookingRules(q)).windowDays;
+}
+
+/** save some of the rules; each is kept inside its allowed range */
+export async function setBookingRules(patch: Partial<BookingRules>): Promise<BookingRules> {
+  for (const k of Object.keys(RULE_KEYS) as (keyof BookingRules)[]) {
+    if (patch[k] === undefined) continue;
+    const value = String(clampRule(k, patch[k]));
+    await db
+      .insert(clinicSetting)
+      .values({ key: RULE_KEYS[k], value })
+      .onConflictDoUpdate({ target: clinicSetting.key, set: { value, updatedAt: new Date() } });
+  }
+  return getBookingRules();
 }
 
 export async function setChairs(n: number): Promise<void> {
@@ -1238,10 +1262,11 @@ export async function createAppointment(
   const d = row.dentistId === null ? { slug: "", name: "" } : await dentistName(row.dentistId);
   await db.insert(staffNotification).values({
     type: "online_booking",
-    title: "การจองใหม่ออนไลน์",
+    title: isUrgent(row.note) ? "การจองใหม่ออนไลน์ — มีอาการปวด/ฉุกเฉิน" : "การจองใหม่ออนไลน์",
     body:
       `${row.childName} นัดหมาย ${row.date} เวลา ${row.time} น. (${row.ref})` +
-      (row.dentistId === null ? " — รอจัดแพทย์" : ""),
+      (row.dentistId === null ? " — รอจัดแพทย์" : "") +
+      (row.note ? `\n${row.note}` : ""),
     refCode: row.ref,
   });
 
@@ -1599,7 +1624,20 @@ export async function listWaitlist(): Promise<WaitlistDTO[]> {
     .select({ w: waitlistEntry, slug: dentist.slug })
     .from(waitlistEntry)
     .leftJoin(dentist, eq(dentist.id, waitlistEntry.dentistId))
-    .where(sql`(${waitlistEntry.createdAt} at time zone 'Asia/Bangkok')::date = ${todayISO()}::date`)
+    // here today: walk-ins added today, and day-queue sign-ups for today
+    // once the desk ticked them in (still-expected ones are in listDayQueue)
+    .where(
+      and(
+        inArray(waitlistEntry.status, ["waiting", "in_chair", "done"]),
+        or(
+          eq(waitlistEntry.visitDate, todayISO()),
+          and(
+            sql`${waitlistEntry.visitDate} is null`,
+            sql`(${waitlistEntry.createdAt} at time zone 'Asia/Bangkok')::date = ${todayISO()}::date`,
+          ),
+        ),
+      ),
+    )
     .orderBy(asc(waitlistEntry.arrivedAt));
 
   return rows.map((r) => ({
@@ -1654,6 +1692,152 @@ export async function updateWaitlistStatus(
     // undefined = leave the assignment alone; null = deliberately un-assign
     .set({ status, ...(dentistId !== undefined ? { dentistId } : {}), updatedAt: new Date() })
     .where(eq(waitlistEntry.id, id));
+}
+
+/* ═══════════════════════════════ day queue ══════════════════════════════ */
+
+function toDayQueueDTO(w: typeof waitlistEntry.$inferSelect): DayQueueDTO {
+  return {
+    id: w.id,
+    ref: w.ref ?? "",
+    visitDate: w.visitDate ?? "",
+    childName: w.childName,
+    phone: w.guardianPhone,
+    treatmentKey: asIconKey(w.treatmentKey),
+    ageGroup: isAgeGroup(w.ageGroup) ? w.ageGroup : null,
+    lineName: w.lineName,
+    note: w.note,
+    status: w.status as DayQueueDTO["status"],
+    createdAt: w.createdAt.toISOString(),
+  };
+}
+
+/** sign-ups still expected from `from` on, by day and then sign-up order */
+export async function listDayQueue(from: string): Promise<DayQueueDTO[]> {
+  const rows = await db
+    .select()
+    .from(waitlistEntry)
+    .where(and(gte(waitlistEntry.visitDate, from), eq(waitlistEntry.status, "expected")))
+    .orderBy(asc(waitlistEntry.visitDate), asc(waitlistEntry.createdAt));
+  return rows.map(toDayQueueDTO);
+}
+
+/** how many have signed up for each of these days (cancelled ones don't count) */
+export async function dayQueueCounts(dates: string[]): Promise<Record<string, number>> {
+  if (dates.length === 0) return {};
+  const sorted = [...dates].sort();
+  const rows = await db
+    .select({ date: waitlistEntry.visitDate, n: sql<number>`count(*)::int` })
+    .from(waitlistEntry)
+    .where(
+      and(
+        gte(waitlistEntry.visitDate, sorted[0]),
+        lte(waitlistEntry.visitDate, sorted[sorted.length - 1]),
+        ne(waitlistEntry.status, "cancelled"),
+      ),
+    )
+    .groupBy(waitlistEntry.visitDate);
+  return Object.fromEntries(rows.filter((r) => r.date).map((r) => [r.date as string, r.n]));
+}
+
+/** everything this LINE account signed up for, newest day last */
+export async function listDayQueueForLine(lineUserId: string): Promise<DayQueueDTO[]> {
+  const rows = await db
+    .select()
+    .from(waitlistEntry)
+    .where(and(eq(waitlistEntry.lineUserId, lineUserId), isNotNull(waitlistEntry.visitDate)))
+    .orderBy(asc(waitlistEntry.visitDate));
+  return rows.map(toDayQueueDTO);
+}
+
+async function nextQueueRef(q: Pick<typeof db, "select">): Promise<string> {
+  for (let digits = 6; ; digits++) {
+    for (let i = 0; i < 10; i++) {
+      const ref = `Q-${Math.floor(10 ** (digits - 1) + Math.random() * 9 * 10 ** (digits - 1))}`;
+      const hit = await q.select({ id: waitlistEntry.id }).from(waitlistEntry).where(eq(waitlistEntry.ref, ref));
+      if (hit.length === 0) return ref;
+    }
+  }
+}
+
+/**
+ * Sign up for a day's queue. Under a per-day lock: the clinic's cap can't be
+ * overrun by families signing up at the same moment, and one LINE account
+ * gets one place per day (signing up again returns the same place).
+ */
+export async function joinDayQueue(input: {
+  date: string;
+  childName: string;
+  phone: string;
+  treatmentKey: TreatmentKey;
+  ageGroup: AgeGroup;
+  note: string;
+  lineUserId: string | null;
+  lineName: string;
+  max: number;
+}): Promise<{ ok: true; entry: DayQueueDTO; replayed: boolean } | { ok: false; error: "full" }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`queue-day:${input.date}`}))`);
+    if (input.lineUserId) {
+      const [mine] = await tx
+        .select()
+        .from(waitlistEntry)
+        .where(
+          and(
+            eq(waitlistEntry.visitDate, input.date),
+            eq(waitlistEntry.lineUserId, input.lineUserId),
+            ne(waitlistEntry.status, "cancelled"),
+          ),
+        );
+      if (mine) return { ok: true as const, entry: toDayQueueDTO(mine), replayed: true };
+    }
+    const [{ n }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(waitlistEntry)
+      .where(and(eq(waitlistEntry.visitDate, input.date), ne(waitlistEntry.status, "cancelled")));
+    if (n >= input.max) return { ok: false as const, error: "full" as const };
+    const [row] = await tx
+      .insert(waitlistEntry)
+      .values({
+        childName: input.childName,
+        guardianPhone: input.phone.replace(/\D/g, ""),
+        treatmentKey: input.treatmentKey,
+        arrivedAt: "",
+        status: "expected",
+        note: input.note,
+        visitDate: input.date,
+        ref: await nextQueueRef(tx),
+        lineUserId: input.lineUserId,
+        lineName: input.lineName,
+        ageGroup: input.ageGroup,
+      })
+      .returning();
+    return { ok: true as const, entry: toDayQueueDTO(row), replayed: false };
+  });
+}
+
+/** the family withdraws a sign-up that hasn't been ticked in yet */
+export async function cancelDayQueue(ref: string, lineUserId: string): Promise<DayQueueDTO | null> {
+  const [row] = await db
+    .update(waitlistEntry)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(eq(waitlistEntry.ref, ref), eq(waitlistEntry.lineUserId, lineUserId), eq(waitlistEntry.status, "expected")))
+    .returning();
+  return row ? toDayQueueDTO(row) : null;
+}
+
+/**
+ * The desk ticks a sign-up in when the family arrives: from then on it is a
+ * walk-in in today's line, stamped with the arrival time. Staff can also
+ * cancel one (the family called).
+ */
+export async function setDayQueueStatus(id: number, status: "waiting" | "cancelled"): Promise<boolean> {
+  const rows = await db
+    .update(waitlistEntry)
+    .set(status === "waiting" ? { status, arrivedAt: clinicNowHHMM(), updatedAt: new Date() } : { status, updatedAt: new Date() })
+    .where(and(eq(waitlistEntry.id, id), eq(waitlistEntry.status, "expected")))
+    .returning({ id: waitlistEntry.id });
+  return rows.length > 0;
 }
 
 export async function removeWaitlist(id: number): Promise<void> {

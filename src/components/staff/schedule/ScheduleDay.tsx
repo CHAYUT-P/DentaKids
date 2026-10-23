@@ -22,6 +22,7 @@ import {
   IconDentist,
 } from "@/components/staff/shell/staffIcons";
 import { AgeTag } from "@/components/staff/shell/AgeTag";
+import { UrgentNote } from "@/components/staff/shell/UrgentNote";
 import { CallFamilyNotice } from "@/components/staff/shell/CallFamilyNotice";
 
 
@@ -46,6 +47,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
     onLeave,
     appointmentsFrom,
     loadHistory,
+    dayQueue,
   } = useStaff();
   const dict = useT();
   const tr = useTreatments();
@@ -203,6 +205,7 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
             <span className="appt-long">{timeRange(appt.time, appt.durationMin)}</span>
           ) : null}
           <AgeTag group={appt.ageGroup} />
+          <UrgentNote note={appt.notes} compact />
         </span>
         {appt.lineName ? (
           <span className="line-tag">LINE · {appt.lineName}</span>
@@ -408,6 +411,24 @@ export function ScheduleDay({ lead }: { lead?: React.ReactNode }) {
 
         </div>
       </div>
+
+      {/* families who signed up for this day's queue on the website (no fixed time) */}
+      {(() => {
+        const queued = dayQueue.filter((q) => q.visitDate === selectedDate);
+        if (queued.length === 0) return null;
+        return (
+          <div className="dayq-strip">
+            <strong>คิวรอไม่ระบุเวลา {queued.length} คน</strong>
+            {queued.map((q) => (
+              <span key={q.id} className="dayq-person" title={`${q.phone}${q.note ? ` · ${q.note}` : ""}`}>
+                {q.childName} · {tr.name(q.treatmentKey)}
+                <UrgentNote note={q.note} compact />
+              </span>
+            ))}
+            <span className="dayq-hint">เช็คอินได้ในหน้า “วันนี้” ของวันนั้น</span>
+          </div>
+        );
+      })()}
 
       {/* ── Main Schedule Matrix (100% Full Width) ────────────────────── */}
       <div className="schedule-matrix-container">

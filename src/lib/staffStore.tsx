@@ -17,6 +17,7 @@ import { TreatmentsProvider } from "@/lib/treatmentsContext";
 import type { ClinicDaySetting } from "@/lib/clinicSettings";
 import { todayISO } from "@/lib/dates";
 import { openStaffEvents } from "@/lib/staffEvents";
+import { DEFAULT_RULES, type BookingRules } from "@/lib/bookingRules";
 import {
   assignPoolDentist,
   staffAddChild,
@@ -34,7 +35,8 @@ import {
   staffSetWaitlistStatus,
   staffUpdateAppointment,
   staffUpdateChairs,
-  staffUpdateBookingWindow,
+  staffUpdateBookingRules,
+  staffSetDayQueueStatus,
   staffAppointmentsBefore,
   staffUpdateClinicInfo,
   staffUpdateDay,
@@ -114,16 +116,20 @@ export interface StaffContextType {
   dentists: EditableDentist[];
   patients: PatientRecord[];
   waitlist: WaitlistEntry[];
+  /** website sign-ups for full days (no fixed time), still expected — today and later */
+  dayQueue: StaffBootstrap["dayQueue"];
+  /** tick a sign-up in when the family arrives (it joins today's walk-ins), or cancel it */
+  setDayQueueStatus: (id: number, status: "waiting" | "cancelled") => Promise<boolean>;
   visitRecords: VisitRecord[];
   notifications: StaffNotification[];
   servicePrices: Record<IconKey, number | null>;
   schedule: ClinicDaySetting[];
   holidays: { id: number; start: string; end: string; name: string }[];
-  /** booking-rules knobs: chairs caps one wall-clock slot; how many days
-   *  ahead families may book on the website */
-  settings: { chairs: number; bookingWindowDays: number };
+  /** booking-rules knobs: chairs caps one wall-clock slot; the online rules
+   *  (src/lib/bookingRules.ts): window, book-before, cancel-before, day queue */
+  settings: { chairs: number } & BookingRules;
   updateChairs: (chairs: number) => void;
-  updateBookingWindow: (days: number) => void;
+  updateBookingRules: (patch: Partial<BookingRules>) => void;
   /** `appointments` holds everything from this date on; older visits load
    *  with loadHistory() when a screen needs them */
   appointmentsFrom: string;
@@ -214,13 +220,14 @@ function withDefaults(b: StaffBootstrap): StaffBootstrap {
     dentistLeaves: b.dentistLeaves ?? [],
     holidays: b.holidays ?? [],
     waitlist: b.waitlist ?? [],
+    dayQueue: b.dayQueue ?? [],
     visitRecords: b.visitRecords ?? [],
     notifications: b.notifications ?? [],
     lineUnread: b.lineUnread ?? 0,
     changeSeq: b.changeSeq ?? 0,
     // an older server sends every appointment ever
     appointmentsFrom: b.appointmentsFrom ?? "0000-01-01",
-    settings: { chairs: b.settings?.chairs ?? 3, bookingWindowDays: b.settings?.bookingWindowDays ?? 14 },
+    settings: { ...DEFAULT_RULES, ...b.settings, chairs: b.settings?.chairs ?? 3 },
   };
 }
 
@@ -804,10 +811,16 @@ export function StaffProvider({
     [mutate],
   );
 
-  const updateBookingWindow = useCallback(
-    (days: number) => {
-      setState((s) => ({ ...s, settings: { ...s.settings, bookingWindowDays: days } }));
-      void mutate("บันทึกระยะจองล่วงหน้า", () => staffUpdateBookingWindow(days));
+  const setDayQueueStatus = useCallback(
+    (id: number, status: "waiting" | "cancelled") =>
+      mutate(status === "waiting" ? "เช็คอินคิวรอ" : "ยกเลิกคิวรอ", () => staffSetDayQueueStatus(id, status)),
+    [mutate],
+  );
+
+  const updateBookingRules = useCallback(
+    (patch: Partial<BookingRules>) => {
+      setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
+      void mutate("บันทึกกฎการจอง", () => staffUpdateBookingRules(patch));
     },
     [mutate],
   );
@@ -893,6 +906,8 @@ export function StaffProvider({
       dentists: state.dentists,
       patients: state.patients,
       waitlist: state.waitlist,
+      dayQueue: state.dayQueue,
+      setDayQueueStatus,
       visitRecords: state.visitRecords ?? [],
       notifications: state.notifications,
       servicePrices: state.servicePrices,
@@ -900,7 +915,7 @@ export function StaffProvider({
       holidays: state.holidays,
       settings: state.settings,
       updateChairs,
-      updateBookingWindow,
+      updateBookingRules,
       appointmentsFrom: state.appointmentsFrom,
       historyLoaded,
       loadHistory,
@@ -955,7 +970,7 @@ export function StaffProvider({
       deleteAppointment, updateDentist, createDentist, createPatient, updatePatient, addPatientChild,
       addWaitlist, updateWaitlistStatus, assignWaitingDentist, removeWaitlist, updateServicePrice, createTreatment, updateTreatment, setAllShowPrice, addDentistLeave, removeDentistLeave, onLeave,
       saveVisitRecord, finishVisit, refresh,
-      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateBookingWindow, historyLoaded, loadHistory, updateClinicInfo, assignDentist,
+      updateDayOpen, updateDayTime, addHoliday, removeHoliday, updateChairs, updateBookingRules, setDayQueueStatus, historyLoaded, loadHistory, updateClinicInfo, assignDentist,
       markAllNotificationsRead, simulateOnlineBooking,
     ],
   );

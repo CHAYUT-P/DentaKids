@@ -490,20 +490,44 @@ export const errorEvent = pgTable(
 );
 
 /** walk-in queue board (waiting → in_chair → done) */
-export const waitlistEntry = pgTable("waitlist_entry", {
-  id: serial("id").primaryKey(),
-  childName: text("child_name").notNull(),
-  guardianPhone: text("guardian_phone").notNull().default(""),
-  treatmentKey: text("treatment_key").notNull(),
-  dentistId: integer("dentist_id").references(() => dentist.id, { onDelete: "set null" }),
-  /** HH:MM arrival time, clinic clock */
-  arrivedAt: text("arrived_at").notNull(),
-  /** "waiting" | "in_chair" | "done" */
-  status: text("status").notNull().default("waiting"),
-  note: text("note").notNull().default(""),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+/**
+ * The no-fixed-time queue. Two kinds of rows:
+ *  - a walk-in, added by the desk when the family is already here
+ *    (visit_date NULL — the day it was created)
+ *  - a day-queue sign-up from the website for a full day (visit_date set,
+ *    status "expected" until the desk ticks them in on the day; then it is a
+ *    walk-in like any other). Signed in with LINE, with its own Q- ref.
+ */
+export const waitlistEntry = pgTable(
+  "waitlist_entry",
+  {
+    id: serial("id").primaryKey(),
+    childName: text("child_name").notNull(),
+    guardianPhone: text("guardian_phone").notNull().default(""),
+    treatmentKey: text("treatment_key").notNull(),
+    dentistId: integer("dentist_id").references(() => dentist.id, { onDelete: "set null" }),
+    /** HH:MM arrival time, clinic clock — "" while a sign-up is still expected */
+    arrivedAt: text("arrived_at").notNull(),
+    /** "expected" | "waiting" | "in_chair" | "done" | "cancelled" */
+    status: text("status").notNull().default("waiting"),
+    note: text("note").notNull().default(""),
+    /** day-queue sign-ups: the day they'll come (YYYY-MM-DD); NULL = walk-in */
+    visitDate: text("visit_date"),
+    /** day-queue sign-ups: "Q-123456", shown to the family */
+    ref: text("ref"),
+    lineUserId: text("line_user_id"),
+    lineName: text("line_name").notNull().default(""),
+    /** "kid" | "adult", as the family picked it */
+    ageGroup: text("age_group"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("waitlist_ref_idx").on(t.ref),
+    index("waitlist_visit_date_idx").on(t.visitDate),
+    index("waitlist_line_idx").on(t.lineUserId),
+  ],
+);
 
 /**
  * What the dentist did during a visit — written on the room page (full

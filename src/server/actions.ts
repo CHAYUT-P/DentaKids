@@ -8,6 +8,8 @@ import { headers } from "next/headers";
 
 import type { IconKey } from "@/data/icons";
 import type { SlotLoad, SlotRow } from "@/server/queries";
+import type { BookingRules } from "@/lib/bookingRules";
+import { familyNote, isUrgent } from "@/lib/urgent";
 import { db } from "@/db/client";
 import { staffNotification } from "@/db/schema";
 import {
@@ -163,7 +165,7 @@ export interface BookResult {
   /** set when ok — the created appointment, for the confirmation slip */
   ref?: string;
   /** set when !ok — the reason to show the parent ("network" is set by the page itself) */
-  error?: "slot_taken" | "invalid" | "line" | "network";
+  error?: "slot_taken" | "invalid" | "line" | "network" | "too_late";
 }
 
 /**
@@ -187,21 +189,21 @@ async function slotVerdict(
   /** a booking being moved — its own slots don't count against it */
   excludeId?: number,
 ): Promise<"ok" | "invalid" | "slot_taken"> {
-  const { todayISO, nowMinutes, minutesOf, addDays } = await import("@/lib/dates");
+  const { todayISO, nowMinutes, addDays, minutesUntil } = await import("@/lib/dates");
   const today = todayISO();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < today) return "invalid";
   // a real calendar day — "2026-02-30" would be stored as typed but read as 2 March
   if (addDays(date, 0) !== date) return "invalid";
   if (!/^\d{2}:\d{2}$/.test(time)) return "invalid";
-  // never bookable: a past date, or today with under an hour to spare —
-  // the same lead the calendar enforces
-  if (date === today && minutesOf(time) < nowMinutes() + 60) return "invalid";
 
-  const { getChairs, liveAtSlot, activeHoldsAtSlot, slotsForDate, capableDentistIds, treatmentDuration, getBookingWindowDays } =
+  const { getChairs, liveAtSlot, activeHoldsAtSlot, slotsForDate, capableDentistIds, treatmentDuration, getBookingRules } =
     await import("@/server/queries");
-  // and never further ahead than the clinic's booking window — the calendar
-  // stops there too, but a request can be sent without the calendar
-  if (date > addDays(today, (await getBookingWindowDays()) - 1)) return "invalid";
+  const rules = await getBookingRules();
+  // never bookable: less notice than the clinic asks for (book-before), or
+  // further ahead than its booking window — the calendar applies both too,
+  // but a request can be sent without the calendar
+  if (minutesUntil(today, nowMinutes(), date, time) < rules.leadHours * 60) return "invalid";
+  if (date > addDays(today, rules.windowDays - 1)) return "invalid";
   const { coveredTimes } = await import("@/lib/slots");
   // a longer treatment (e.g. whitening, 1 hour) needs every half-hour it runs into
   const need = coveredTimes(time, await treatmentDuration(treatmentKey));
@@ -248,18 +250,20 @@ async function slotVerdict(
 export async function bookingAvailability(month: string): Promise<{
   slots: Record<string, SlotRow[]>;
   load: Record<string, Record<string, SlotLoad>>;
+  /** day-queue sign-ups per day (for "รอคิว" on full days) */
+  queueCounts: Record<string, number>;
 } | null> {
   if (typeof month !== "string" || !/^\d{4}-\d{2}-01$/.test(month)) return null;
   if (await limited("avail", 120, 600)) return null;
   const { todayISO, addDays, daysInMonth } = await import("@/lib/dates");
-  const { getBookingWindowDays, slotsForDates, slotLoadForDates } = await import("@/server/queries");
+  const { getBookingWindowDays, slotsForDates, slotLoadForDates, dayQueueCounts } = await import("@/server/queries");
   const today = todayISO();
   const lastDay = addDays(today, (await getBookingWindowDays()) - 1);
   const dates = Array.from({ length: daysInMonth(month) }, (_, i) => addDays(month, i)).filter(
     (d) => d >= today && d <= lastDay,
   );
-  const [slots, load] = await Promise.all([slotsForDates(dates), slotLoadForDates(dates)]);
-  return { slots, load };
+  const [slots, load, queueCounts] = await Promise.all([slotsForDates(dates), slotLoadForDates(dates), dayQueueCounts(dates)]);
+  return { slots, load, queueCounts };
 }
 
 /**
@@ -326,6 +330,9 @@ export async function bookAppointment(input: {
   /** one per booking attempt (the page makes it): a retry or a double tap
    *  with the same key gets the first booking back, never a second one */
   idempotencyKey?: string;
+  /** a short note for the clinic, and "in pain / emergency" (src/lib/urgent.ts) */
+  note?: string;
+  urgent?: boolean;
 }): Promise<BookResult> {
   // a retry of a booking that already went through: same answer, nothing new
   // (checked before the rate limit so a flaky connection can't lock a family out)
@@ -401,6 +408,7 @@ export async function bookAppointment(input: {
     // nickname + phone only — no guardian/child records from the patient site
     register: false,
     idempotencyKey: key,
+    note: familyNote(input.note, input.urgent),
   });
 
   if (!created) return { ok: false, error: "slot_taken" };
@@ -505,34 +513,183 @@ export async function myMessagesByLine(lineIdToken: string) {
 }
 
 /**
- * The booking this LINE account may still change: its own, confirmed (not yet
- * checked in), and not in the past. null otherwise.
+ * The booking this LINE account may still change itself: its own, confirmed
+ * (not yet checked in), and more than the clinic's cancel-before hours away
+ * ("too_late" — the family calls the clinic instead). null if it isn't
+ * theirs to change at all.
  */
 async function ownUpcomingBooking(ref: string, lineIdToken: string) {
   if (!ref || !lineIdToken) return null;
   const identity = await patientIdentity(lineIdToken);
   if (!identity) return null;
-  const { listAppointmentsForLine } = await import("@/server/queries");
+  const { listAppointmentsForLine, getBookingRules } = await import("@/server/queries");
   const target = (await listAppointmentsForLine(identity.userId)).find((a) => a.ref === ref);
   if (!target || target.status !== "confirmed") return null;
-  const { minutesOf, nowMinutes } = await import("@/lib/dates");
-  const today = todayISO();
-  if (target.date < today || (target.date === today && minutesOf(target.time) < nowMinutes())) return null;
-  return target;
+  const { minutesUntil, nowMinutes } = await import("@/lib/dates");
+  const left = minutesUntil(todayISO(), nowMinutes(), target.date, target.time);
+  if (left < 0) return null;
+  const { cancelHours } = await getBookingRules();
+  if (left < cancelHours * 60) return { ...target, tooLate: true as const, identity };
+  return { ...target, tooLate: false as const, identity };
 }
 
 /** The patient cancelled their own booking (signed in with LINE). */
-export async function cancelBooking(ref: string, lineIdToken: string): Promise<{ ok: boolean }> {
+export async function cancelBooking(
+  ref: string,
+  lineIdToken: string,
+): Promise<{ ok: boolean; error?: "too_late" }> {
   if (await limited("cancel", 10, 600)) return { ok: false };
   const target = await ownUpcomingBooking(ref, lineIdToken);
   if (!target) return { ok: false };
+  if (target.tooLate) return { ok: false, error: "too_late" };
   await updateAppointment(target.id, { status: "cancelled" });
   // a freed chair can home a pooled booking still waiting at that slot
   const { settlePool } = await import("@/server/queries");
   await settlePool(target.date, target.time);
   await dbInsertCancellationNotice(target.ref, target.childName, target.date, target.time);
+  // tell the family it really went through (a LINE failure never undoes it)
+  const { pushLineText } = await import("@/server/line");
+  await pushLineText(
+    target.identity.userId,
+    `ยกเลิกนัดเรียบร้อยแล้ว\nนัดของ ${target.childName}\n${thaiDate(target.date)} เวลา ${target.time} น.\nรหัสจอง: ${target.ref}\nหากต้องการนัดใหม่ จองได้ทาง LINE นี้เลยค่ะ`,
+  );
   await revalidateAll();
   return { ok: true };
+}
+
+/* ═══════════════════ day queue (no fixed time, full days) ═══════════════ */
+
+export type DayQueueResult =
+  | { ok: true; ref: string; already: boolean }
+  | { ok: false; error: "invalid" | "line" | "full" | "closed" };
+
+/**
+ * A family signs up for a full day's queue: they come that day and are seen
+ * when a dentist has a gap. Same checks as a booking where they apply (a real
+ * open day inside the window, a treatment shown online, kid/adult, a verified
+ * LINE account) plus the clinic's per-day cap (rules.dayQueueMax, 0 = off).
+ */
+export async function joinDayQueue(input: {
+  date: string;
+  treatmentKey: TreatmentKey;
+  ageGroup?: AgeGroup | null;
+  childName: string;
+  phone: string;
+  note?: string;
+  urgent?: boolean;
+  lineIdToken?: string;
+}): Promise<DayQueueResult> {
+  if (await limited("queue", 10, 600)) return { ok: false, error: "invalid" };
+  const name = typeof input.childName === "string" ? input.childName.trim().slice(0, 60) : "";
+  const phone = typeof input.phone === "string" ? input.phone.trim().slice(0, 20) : "";
+  if (!name || !/^[0-9]{9,10}$/.test(phone.replace(/\D/g, "")) || !isAgeGroup(input.ageGroup)) {
+    return { ok: false, error: "invalid" };
+  }
+  const { addDays, nowMinutes, minutesOf, weekday } = await import("@/lib/dates");
+  const today = todayISO();
+  const date = input.date;
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || addDays(date, 0) !== date || date < today) {
+    return { ok: false, error: "invalid" };
+  }
+  const { getBookingRules, isBookableTreatment, listClinicDays, listHolidays, joinDayQueue: join } = await import(
+    "@/server/queries"
+  );
+  const rules = await getBookingRules();
+  if (rules.dayQueueMax <= 0 || date > addDays(today, rules.windowDays - 1)) return { ok: false, error: "invalid" };
+  if (!(await isBookableTreatment(input.treatmentKey))) return { ok: false, error: "invalid" };
+  // the clinic must be open that day, and (today) not about to close
+  const day = (await listClinicDays()).find((d) => d.day === weekday(date));
+  const holidays = await listHolidays();
+  if (!day?.isOpen || holidays.some((h) => h.start <= date && h.end >= date)) return { ok: false, error: "closed" };
+  if (date === today && nowMinutes() > minutesOf(day.end) - 60) return { ok: false, error: "closed" };
+
+  const identity = await patientIdentity(input.lineIdToken);
+  if (!identity && process.env.LINE_LOGIN_CHANNEL_ID) return { ok: false, error: "line" };
+
+  const res = await join({
+    date,
+    childName: name,
+    phone,
+    treatmentKey: input.treatmentKey,
+    ageGroup: input.ageGroup,
+    note: familyNote(input.note, input.urgent),
+    lineUserId: identity?.userId ?? null,
+    lineName: identity?.displayName ?? "",
+    max: rules.dayQueueMax,
+  });
+  if (!res.ok) return res;
+  if (res.replayed) return { ok: true, ref: res.entry.ref, already: true };
+
+  await db.insert(staffNotification).values({
+    type: "online_booking",
+    title: isUrgent(res.entry.note) ? "ลงชื่อรอคิว (ไม่ระบุเวลา) — มีอาการปวด/ฉุกเฉิน" : "ลงชื่อรอคิว (ไม่ระบุเวลา)",
+    body: `${name} รอคิววันที่ ${date} (${res.entry.ref})${res.entry.note ? `\n${res.entry.note}` : ""}`,
+    refCode: res.entry.ref,
+  });
+  if (identity) {
+    const { pushLineText } = await import("@/server/line");
+    await pushLineText(
+      identity.userId,
+      `ลงชื่อรอคิวสำเร็จ ✓\n${name}\n${thaiDate(date)} (ไม่ระบุเวลา)\nมาที่คลินิกได้ช่วง ${day.start}–${day.end} น. แล้วแจ้งที่เคาน์เตอร์ คุณหมอจะตรวจเมื่อมีช่องว่าง อาจต้องรอนานกว่าปกติ\nรหัสคิว: ${res.entry.ref}`,
+    );
+  }
+  await revalidateAll();
+  return { ok: true, ref: res.entry.ref, already: false };
+}
+
+/** the family's own day-queue sign-ups (signed in with LINE) */
+export async function myDayQueueByLine(lineIdToken: string) {
+  const identity = await patientIdentity(lineIdToken);
+  if (!identity) return null;
+  const { listDayQueueForLine } = await import("@/server/queries");
+  return (await listDayQueueForLine(identity.userId)).map((e) => ({
+    ref: e.ref,
+    date: e.visitDate,
+    childName: e.childName,
+    treatmentKey: e.treatmentKey,
+    note: e.note,
+    status: e.status,
+  }));
+}
+
+/**
+ * The family withdraws a day-queue sign-up — until cancel-before hours ahead
+ * of the clinic opening that day, like a booking at the first time of the day.
+ */
+export async function cancelDayQueueEntry(
+  ref: string,
+  lineIdToken: string,
+): Promise<{ ok: boolean; error?: "too_late" }> {
+  if (await limited("cancel", 10, 600)) return { ok: false };
+  const identity = await patientIdentity(lineIdToken);
+  if (!identity || typeof ref !== "string") return { ok: false };
+  const { listDayQueueForLine, listClinicDays, getBookingRules, cancelDayQueue } = await import("@/server/queries");
+  const entry = (await listDayQueueForLine(identity.userId)).find((e) => e.ref === ref);
+  if (!entry || entry.status !== "expected") return { ok: false };
+  const { weekday, minutesUntil, nowMinutes } = await import("@/lib/dates");
+  const opens = (await listClinicDays()).find((d) => d.day === weekday(entry.visitDate))?.start ?? "00:00";
+  const left = minutesUntil(todayISO(), nowMinutes(), entry.visitDate, opens);
+  const { cancelHours } = await getBookingRules();
+  if (cancelHours > 0 && left < cancelHours * 60) return { ok: false, error: "too_late" };
+  const done = await cancelDayQueue(ref, identity.userId);
+  if (!done) return { ok: false };
+  await dbInsertCancellationNotice(done.ref, done.childName, done.visitDate, "ไม่ระบุเวลา");
+  const { pushLineText } = await import("@/server/line");
+  await pushLineText(
+    identity.userId,
+    `ยกเลิกการรอคิวเรียบร้อยแล้ว\n${done.childName}\n${thaiDate(done.visitDate)} (ไม่ระบุเวลา)\nรหัสคิว: ${done.ref}`,
+  );
+  await revalidateAll();
+  return { ok: true };
+}
+
+/** the desk: tick a sign-up in when the family arrives, or cancel it (they called) */
+export async function staffSetDayQueueStatus(id: number, status: "waiting" | "cancelled") {
+  await guard();
+  if (status !== "waiting" && status !== "cancelled") throw new Error("invalid status");
+  const { setDayQueueStatus } = await import("@/server/queries");
+  if (!(await setDayQueueStatus(id, status))) throw new Error("not_expected");
+  await revalidateAll();
 }
 
 /**
@@ -558,6 +715,7 @@ export async function rescheduleBooking(input: {
   // checked in, finished, cancelled or in the past
   const target = await ownUpcomingBooking(input.ref, input.lineIdToken);
   if (!target) return { ok: false, error: "invalid" };
+  if (target.tooLate) return { ok: false, error: "too_late" };
   if (target.date === input.date && target.time === input.time) return { ok: true, ref: target.ref };
 
   if (input.holdToken) {
@@ -721,11 +879,11 @@ export async function staffUpdateChairs(chairs: number) {
   await revalidateAll();
 }
 
-/** how far ahead families may book on the website (at most a year) */
-export async function staffUpdateBookingWindow(days: number) {
+/** the online-booking rules: window, book-before, cancel-before, day queue */
+export async function staffUpdateBookingRules(patch: Partial<BookingRules>) {
   await guard();
-  const { setBookingWindowDays } = await import("@/server/queries");
-  const saved = await setBookingWindowDays(days);
+  const { setBookingRules } = await import("@/server/queries");
+  const saved = await setBookingRules(patch ?? {});
   await revalidateAll();
   return saved;
 }
@@ -1522,7 +1680,8 @@ export async function staffBootstrap() {
     listTreatmentCatalog,
     listDentistLeaves,
     getClinicInfo,
-    getBookingWindowDays,
+    getBookingRules,
+    listDayQueue,
   } = await import("@/server/queries");
 
   const { todayISO, addDays } = await import("@/lib/dates");
@@ -1535,7 +1694,7 @@ export async function staffBootstrap() {
   const changeSeq = await (await import("@/server/changes")).currentChangeSeq();
 
   const lineUnread = await (await import("@/server/chat")).unreadCount().catch(() => 0);
-  const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves, clinicInfo, bookingWindowDays] =
+  const [appts, dentists, patients, waitlist, visitRecords, notifications, days, holidays, prices, chairs, treatments, dentistLeaves, clinicInfo, bookingRules, dayQueue] =
     await Promise.all([
       listAppointmentsForStaff(appointmentsFrom, new Date(Date.now() - 24 * 3600_000)),
       listDentists(),
@@ -1550,7 +1709,8 @@ export async function staffBootstrap() {
       listTreatmentCatalog(),
       listDentistLeaves(),
       getClinicInfo(),
-      getBookingWindowDays(),
+      getBookingRules(),
+      listDayQueue(today),
     ]);
 
   return {
@@ -1568,7 +1728,9 @@ export async function staffBootstrap() {
     servicePrices: prices,
     treatments,
     dentistLeaves,
-    settings: { chairs, bookingWindowDays },
+    settings: { chairs, ...bookingRules },
+    /** website sign-ups for full days, still expected (today and later) */
+    dayQueue,
     /** the clinic's saved contact details — the settings form starts from these */
     clinicInfo,
     /** the change number this data is current to (live updates, design/04) */

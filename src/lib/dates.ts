@@ -129,6 +129,11 @@ export function daysFrom(todayISO: string, iso: string): number {
   return Math.round((at(iso).getTime() - at(todayISO).getTime()) / DAY);
 }
 
+/** minutes from now (clinic clock: `today` + `nowMin`) until `iso` at `hhmm` — negative once it has passed */
+export function minutesUntil(today: string, nowMin: number, iso: string, hhmm: string): number {
+  return daysFrom(today, iso) * 1440 + minutesOf(hhmm) - nowMin;
+}
+
 /** "จ. 8 ก.ย." / "Mon 8 Sep" */
 export function fmtShort(t: Dict, iso: string): string {
   return `${t.weekday[weekday(iso)]} ${dayOfMonth(iso)} ${t.month[monthKey(iso)]}`;

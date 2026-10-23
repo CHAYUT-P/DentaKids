@@ -215,7 +215,7 @@ async function main() {
   let far = addDays(today, 300);
   while (![2, 3, 5, 6].includes(weekdayIndex(far))) far = addDays(far, 1);
   const farTime = [...new Set((await queries.slotsForDate(far)).filter((s) => !s.taken).map((s) => s.time))].sort()[0];
-  await actions.staffUpdateBookingWindow(14);
+  await actions.staffUpdateBookingRules({ windowDays: 14 });
   const tooFar = await actions.bookAppointment({ ageGroup: "kid",
     date: far, time: farTime, treatmentKey: "fluoride", dentistId: null,
     childName: "น้องไกล", phone: "0912345678", lineIdToken: FAMILY,
@@ -224,7 +224,7 @@ async function main() {
   ok("14-day window: no hold that far ahead either", !(await actions.holdSlot({ date: far, time: farTime, treatmentKey: "fluoride", dentistId: null })).ok);
   const farMonth = far.slice(0, 8) + "01";
   ok("14-day window: the calendar gets no days that far ahead", Object.keys((await actions.bookingAvailability(farMonth))?.slots ?? {}).length === 0);
-  await actions.staffUpdateBookingWindow(365);
+  await actions.staffUpdateBookingRules({ windowDays: 365 });
   ok("window saved as 1 year", (await queries.getBookingWindowDays()) === 365);
   ok("1-year window: the calendar loads that month", far in ((await actions.bookingAvailability(farMonth))?.slots ?? {}));
   const yearAhead = await actions.bookAppointment({ ageGroup: "kid",
@@ -233,9 +233,9 @@ async function main() {
   });
   ok(`1-year window: booking ${far} works`, yearAhead.ok, JSON.stringify(yearAhead));
   if (yearAhead.ref) await actions.cancelBooking(yearAhead.ref, FAMILY);
-  await actions.staffUpdateBookingWindow(400);
+  await actions.staffUpdateBookingRules({ windowDays: 400 });
   ok("never more than a year", (await queries.getBookingWindowDays()) === 365);
-  await actions.staffUpdateBookingWindow(savedWindow);
+  await actions.staffUpdateBookingRules({ windowDays: savedWindow });
 
   console.log("\n— 10. Availability in one batch, staff download slimmed —");
   const days14 = Array.from({ length: 14 }, (_, i) => addDays(today, i));
@@ -256,6 +256,78 @@ async function main() {
   );
   const older = await actions.staffAppointmentsBefore(boot.appointmentsFrom);
   ok("older history loads separately, only before that date", older.every((a) => a.date < boot.appointmentsFrom));
+
+  console.log("\n— 11. Book-before, cancel-before, cancel message —");
+  const rulesBefore = await queries.getBookingRules();
+  await actions.staffUpdateBookingRules({ windowDays: 30, leadHours: 1, cancelHours: 0 });
+  let soonDay = addDays(today, 1);
+  while (![2, 3, 5, 6].includes(weekdayIndex(soonDay))) soonDay = addDays(soonDay, 1);
+  const soonTime = [...new Set((await queries.slotsForDate(soonDay)).filter((x) => !x.taken).map((x) => x.time))].sort()[0];
+  await actions.staffUpdateBookingRules({ leadHours: 168 });
+  const tooSoon = await actions.bookAppointment({ ageGroup: "kid",
+    date: soonDay, time: soonTime, treatmentKey: "fluoride", dentistId: null,
+    childName: "น้องเร็ว", phone: "0912345678", lineIdToken: FAMILY,
+  });
+  ok("book-before 168 h: a booking within the week is refused", !tooSoon.ok && tooSoon.error === "invalid", JSON.stringify(tooSoon));
+  await actions.staffUpdateBookingRules({ leadHours: 1 });
+  const soonOk = await actions.bookAppointment({ ageGroup: "kid",
+    date: soonDay, time: soonTime, treatmentKey: "fluoride", dentistId: null,
+    childName: "น้องเร็ว", phone: "0912345678", lineIdToken: FAMILY,
+    note: "ฟันกรามซ้ายปวดตอนกลางคืน", urgent: true,
+  });
+  ok("book-before 1 h: the same booking works", soonOk.ok, JSON.stringify(soonOk));
+  const { URGENT_MARK } = await import("../src/lib/urgent");
+  const { db: ndb } = await import("../src/db/client");
+  const { appointment: apptT } = await import("../src/db/schema");
+  const { eq: neq } = await import("drizzle-orm");
+  const [soonFull] = await ndb.select({ note: apptT.note }).from(apptT).where(neq(apptT.ref, soonOk.ref ?? ""));
+  ok("pain/emergency note saved with its mark", !!soonFull?.note?.startsWith(URGENT_MARK) && soonFull.note.includes("ฟันกราม"));
+  ok(
+    "staff told it's urgent",
+    (await queries.listNotifications()).some((n) => n.refCode === soonOk.ref && n.title.includes("ปวด/ฉุกเฉิน")),
+  );
+  await actions.staffUpdateBookingRules({ cancelHours: 168 });
+  const late = await actions.cancelBooking(soonOk.ref!, FAMILY);
+  ok("cancel-before 168 h: the family can't cancel online", !late.ok && late.error === "too_late", JSON.stringify(late));
+  const lateMove = await actions.rescheduleBooking({ ref: soonOk.ref!, lineIdToken: FAMILY, date: soonDay, time: soonTime });
+  ok("…nor move it", !lateMove.ok && lateMove.error === "too_late", JSON.stringify(lateMove));
+  await actions.staffUpdateBookingRules({ cancelHours: 0 });
+  ok("cancel-before 0: now they can", (await actions.cancelBooking(soonOk.ref!, FAMILY)).ok);
+  ok("rules stay in range", (await actions.staffUpdateBookingRules({ leadHours: 9999, cancelHours: -5 })).leadHours === 168);
+
+  console.log("\n— 12. Day queue (full day, no fixed time) —");
+  const days = await queries.listClinicDays();
+  const { weekday: dayKey } = await import("../src/lib/dates");
+  let qDay = addDays(today, 2);
+  while (!days.find((d) => d.day === dayKey(qDay))?.isOpen) qDay = addDays(qDay, 1);
+  await actions.staffUpdateBookingRules({ dayQueueMax: 2 });
+  const qBase = { date: qDay, treatmentKey: "checkup" as const, ageGroup: "kid" as const, phone: "0933333333" };
+  const q1 = await actions.joinDayQueue({ ...qBase, childName: "e2e-q1", lineIdToken: "e2e-q-fam1", urgent: true });
+  ok("a family joins the day's queue", q1.ok && q1.ref.startsWith("Q-"), JSON.stringify(q1));
+  const q1again = await actions.joinDayQueue({ ...qBase, childName: "e2e-q1", lineIdToken: "e2e-q-fam1" });
+  ok("joining again gives the same place", q1again.ok && q1.ok && q1again.ref === q1.ref && q1again.already);
+  const q2 = await actions.joinDayQueue({ ...qBase, childName: "e2e-q2", lineIdToken: "e2e-q-fam2" });
+  const q3 = await actions.joinDayQueue({ ...qBase, childName: "e2e-q3", lineIdToken: "e2e-q-fam3" });
+  ok("the clinic's cap (2) holds", q2.ok && !q3.ok && q3.error === "full", JSON.stringify(q3));
+  const boot2 = await actions.staffBootstrap();
+  ok("staff see the sign-ups", boot2.dayQueue.filter((x) => x.visitDate === qDay && x.childName.startsWith("e2e-q")).length === 2);
+  const myQueue = await actions.myDayQueueByLine("e2e-q-fam1");
+  ok("the family sees theirs in my bookings", myQueue?.some((x) => x.ref === (q1.ok ? q1.ref : "")) === true);
+  ok("someone else can't cancel it", !(await actions.cancelDayQueueEntry(q1.ok ? q1.ref : "", "e2e-q-fam2")).ok);
+  ok("the family cancels", (await actions.cancelDayQueueEntry(q1.ok ? q1.ref : "", "e2e-q-fam1")).ok);
+  const q3b = await actions.joinDayQueue({ ...qBase, childName: "e2e-q3", lineIdToken: "e2e-q-fam3" });
+  ok("a freed place can be taken", q3b.ok);
+  const q2row = boot2.dayQueue.find((x) => x.childName === "e2e-q2")!;
+  await actions.staffSetDayQueueStatus(q2row.id, "waiting");
+  const { db: qdb } = await import("../src/db/client");
+  const { waitlistEntry: wl2 } = await import("../src/db/schema");
+  const { eq: qeq } = await import("drizzle-orm");
+  const [arrivedRow] = await qdb.select().from(wl2).where(qeq(wl2.id, q2row.id));
+  ok("the desk ticks one in: it becomes a walk-in with an arrival time", arrivedRow.status === "waiting" && /^\d{2}:\d{2}$/.test(arrivedRow.arrivedAt));
+  // leave no test sign-ups behind, and the rules as they were
+  const { like: qlike } = await import("drizzle-orm");
+  await qdb.delete(wl2).where(qlike(wl2.childName, "e2e-q%"));
+  await actions.staffUpdateBookingRules(rulesBefore);
 
   console.log(`\n═══ ${passed} passed, ${failed} failed ═══\n`);
   process.exit(failed ? 1 : 0);

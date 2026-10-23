@@ -3,6 +3,7 @@ import type { TreatmentInfo, TreatmentKey } from "@/lib/treatments";
 import type { ClinicDaySetting } from "@/lib/clinicSettings";
 import type { DfStatement, ReportData } from "@/server/reports";
 import type { ChatConversation, ChatMessage } from "@/server/chat";
+import type { DayQueueDTO } from "@/server/queries";
 import type { AuditRow, ClockRow, Role, StaffUserInfo, WhoAmI } from "@/lib/roles";
 import type { ImportField } from "@/lib/dataio";
 import type { Consumable, Expense, LabOrder, MoveKind, StockItem, StockMove, Supplier } from "@/lib/stock";
@@ -139,7 +140,9 @@ export interface StaffBootstrap {
   lineUnread: number;
   /** the change number this data is current to (live updates) */
   changeSeq: number;
-  settings: { chairs: number; bookingWindowDays: number };
+  settings: { chairs: number; windowDays: number; leadHours: number; cancelHours: number; dayQueueMax: number };
+  /** website sign-ups for full days, still expected (today and later) */
+  dayQueue: DayQueueDTO[];
   clinicInfo: {
     phone: string;
     phoneDisplay: string;
@@ -211,8 +214,12 @@ export function staffUpdateChairs(chairs: number) {
   return call<void>("updateChairs", [chairs]);
 }
 
-export function staffUpdateBookingWindow(days: number) {
-  return call<number>("updateBookingWindow", [days]);
+export function staffSetDayQueueStatus(id: number, status: "waiting" | "cancelled") {
+  return call<void>("setDayQueueStatus", [id, status]);
+}
+
+export function staffUpdateBookingRules(patch: Partial<StaffBootstrap["settings"]>) {
+  return call<StaffBootstrap["settings"]>("updateBookingRules", [patch]);
 }
 
 export function staffAppointmentsBefore(date: string) {

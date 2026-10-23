@@ -11,7 +11,7 @@ import {
 } from "@/components/staff/shell/staffIcons";
 import { RangeCalendar, dayCount, fmtHolidayRange, fmtTHDate } from "@/components/staff/schedule/RangeCalendar";
 import { SystemStatus } from "@/components/staff/settings/SystemStatus";
-import { WINDOW_CHOICES, windowLabelTh } from "@/lib/bookingWindow";
+import { clampRule, hoursLabelTh, MAX_DAY_QUEUE, MAX_RULE_HOURS, WINDOW_CHOICES, windowLabelTh, type BookingRules } from "@/lib/bookingRules";
 
 const DAY_LABELS: Record<DayKey, { th: string; en: string }> = {
   mon: { th: "วันจันทร์", en: "Monday" },
@@ -39,7 +39,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
     holidays,
     settings,
     updateChairs,
-    updateBookingWindow,
+    updateBookingRules,
     clinicInfo,
     updateClinicInfo,
     updateDayOpen,
@@ -79,10 +79,20 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   const [selHover, setSelHover] = useState<string | null>(null);
   const [newHolidayName, setNewHolidayName] = useState("");
 
-  // the booking rules staff set here: chairs, and how far ahead families may
-  // book on the website (the others are fixed, see below)
+  // the booking rules staff set here: chairs and the online rules (window,
+  // book-before, cancel-before, day queue); the others are fixed, see below.
+  // Hour boxes hold what's typed; saving keeps each inside its range.
   const [chairCount, setChairCount] = useState<number>(settings.chairs);
-  const [windowDays, setWindowDays] = useState<number>(settings.bookingWindowDays);
+  const [windowDays, setWindowDays] = useState<number>(settings.windowDays);
+  const [ruleText, setRuleText] = useState({
+    leadHours: String(settings.leadHours),
+    cancelHours: String(settings.cancelHours),
+    dayQueueMax: String(settings.dayQueueMax),
+  });
+  const ruleBad = (k: keyof typeof ruleText) => {
+    const max = k === "dayQueueMax" ? MAX_DAY_QUEUE : MAX_RULE_HOURS;
+    return !/^\d+$/.test(ruleText[k].trim()) || Number(ruleText[k]) > max;
+  };
 
   // the clinic's contact details, starting from what is saved — so saving
   // never puts demo values back
@@ -131,8 +141,18 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (activeTab === "booking") {
+      if ((["leadHours", "cancelHours", "dayQueueMax"] as const).some(ruleBad)) {
+        showToast(`ตัวเลขไม่ถูกต้อง: ชั่วโมงต้องเป็น 0–${MAX_RULE_HOURS}, คิวรอ 0–${MAX_DAY_QUEUE} — ยังไม่ได้บันทึก`);
+        return;
+      }
       if (chairCount !== settings.chairs) updateChairs(chairCount);
-      if (windowDays !== settings.bookingWindowDays) updateBookingWindow(windowDays);
+      const patch: Partial<BookingRules> = {};
+      if (windowDays !== settings.windowDays) patch.windowDays = windowDays;
+      for (const k of ["leadHours", "cancelHours", "dayQueueMax"] as const) {
+        const v = clampRule(k, ruleText[k].trim());
+        if (v !== settings[k]) patch[k] = v;
+      }
+      if (Object.keys(patch).length) updateBookingRules(patch);
       showToast("บันทึกกฎการจองแล้ว");
       return;
     }
@@ -426,7 +446,7 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                 gap: "16px",
                 boxShadow: "var(--staff-shadow-sm)",
               }}>
-              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>เก้าอี้ทำฟัน &amp; ระยะจองล่วงหน้า</strong>
+              <strong style={{ fontSize: "15px", color: "var(--staff-ink)" }}>เก้าอี้ทำฟัน &amp; กฎการจองออนไลน์</strong>
               <div className="form-group">
                 <label>จำนวนเก้าอี้ที่ใช้งานได้</label>
                 <select className="form-control" value={chairCount} onChange={(e) => setChairCount(Number(e.target.value))}>
@@ -457,6 +477,43 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                   ปฏิทินในหน้าจองออนไลน์เปิดให้เลือกวันได้ถึงเท่านี้ (สูงสุด 1 ปี) — เจ้าหน้าที่ลงนัดในแอปนี้ได้ทุกวันเหมือนเดิม
                 </span>
               </div>
+              {(
+                [
+                  {
+                    k: "leadHours",
+                    label: "ต้องจองก่อนเวลานัดอย่างน้อย",
+                    unit: "ชั่วโมง",
+                    hint: "0 = จองได้จนถึงเวลานัด · เช่น 24 = ต้องจองล่วงหน้าอย่างน้อย 1 วัน",
+                  },
+                  {
+                    k: "cancelHours",
+                    label: "ผู้ปกครองยกเลิก/เลื่อนนัดเองได้ถึง",
+                    unit: "ชั่วโมงก่อนนัด",
+                    hint: "0 = ได้จนถึงเวลานัด · หลังจากนั้นหน้าเว็บให้โทรหาคลินิกแทน (เจ้าหน้าที่ยังเลื่อน/ยกเลิกได้เสมอ)",
+                  },
+                  {
+                    k: "dayQueueMax",
+                    label: "คิวรอไม่ระบุเวลา (วันที่จองเต็ม) รับได้วันละ",
+                    unit: "คน",
+                    hint: "0 = ไม่เปิดรับ · ผู้ปกครองลงชื่อมารอคิวในวันนั้นได้ จะขึ้นในหน้า “วันนี้” ของวันนั้น",
+                  },
+                ] as const
+              ).map((r) => (
+                <div className="form-group" key={r.k}>
+                  <label>{r.label}</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      className="form-control"
+                      inputMode="numeric"
+                      style={{ width: "110px", borderColor: ruleBad(r.k) ? "var(--staff-rose-deep)" : undefined }}
+                      value={ruleText[r.k]}
+                      onChange={(e) => setRuleText((t) => ({ ...t, [r.k]: e.target.value }))}
+                    />
+                    <span style={{ fontSize: "13px", color: "var(--staff-ink-muted)" }}>{r.unit}</span>
+                  </div>
+                  <span className="settings-hint">{r.hint}</span>
+                </div>
+              ))}
             </div>
 
             <div style={{
@@ -478,10 +535,28 @@ export function ClinicSettings({ tab }: { tab: SettingsTab }) {
                   <strong>1 คิว = 30 นาที</strong> — บริการที่ใช้เวลานานกว่า (เช่น ฟอกสีฟัน 1 ชม.) กันหลายช่องอัตโนมัติ ตั้งใน “บริการ &amp; ราคา”
                 </li>
                 <li>
-                  <strong>จองล่วงหน้าได้ {windowLabelTh(settings.bookingWindowDays)}</strong> และต้องจองก่อนเวลานัดอย่างน้อย <strong>1 ชั่วโมง</strong>
+                  <strong>จองล่วงหน้าได้ {windowLabelTh(settings.windowDays)}</strong>
+                  {settings.leadHours > 0 ? (
+                    <>
+                      {" "}และต้องจองก่อนเวลานัดอย่างน้อย <strong>{hoursLabelTh(settings.leadHours)}</strong>
+                    </>
+                  ) : (
+                    " จองได้จนถึงเวลานัด"
+                  )}
                 </li>
                 <li>
-                  ผู้ปกครอง<strong>เลื่อน/ยกเลิกนัดเองได้</strong>ทาง LINE จนกว่าจะเช็คอิน
+                  ผู้ปกครอง<strong>เลื่อน/ยกเลิกนัดเองได้</strong>ทาง LINE
+                  {settings.cancelHours > 0 ? ` จนถึง ${hoursLabelTh(settings.cancelHours)} ก่อนนัด (หลังจากนั้นโทรหาคลินิก)` : " จนถึงเวลานัด"}
+                  {" "}— ยกเลิกแล้วได้ข้อความยืนยันทาง LINE
+                </li>
+                <li>
+                  {settings.dayQueueMax > 0 ? (
+                    <>
+                      วันที่จองเต็ม ผู้ปกครอง<strong>ลงชื่อรอคิวแบบไม่ระบุเวลา</strong>ได้วันละไม่เกิน <strong>{settings.dayQueueMax} คน</strong>
+                    </>
+                  ) : (
+                    "ไม่เปิดคิวรอแบบไม่ระบุเวลา"
+                  )}
                 </li>
                 <li>
                   จองแล้ว<strong>ยืนยันทันที</strong> ได้รหัสจองและข้อความยืนยันทาง LINE

@@ -95,9 +95,13 @@ docs/                     this file, design notes (docs/design/), deployment gui
 
 - **Website:** kid/adult → treatment → dentist (or "any dentist") → calendar
   (as far ahead as the clinic allows, up to a year; closed days, dentist leave
-  and full days greyed out) → time → name + phone →
+  and full days greyed out) → time → name + phone, an optional note and a
+  "in pain / emergency" tick →
   booked, with a LINE confirmation. My bookings (via LINE), move or cancel with
-  a confirm step, the clinic's messages (bell), dentist profiles with photos,
+  a confirm step (until the clinic's cancel-before hours, then "call the
+  clinic"; a LINE message confirms a cancel). **A full day** can take the
+  no-fixed-time queue: the family signs up (code Q-…), comes that day and is
+  seen when a dentist has a gap. The clinic's messages (bell), dentist profiles with photos,
   services with show/hide prices, clinic page with hours, phone and map. Thai
   and English.
 - **Staff (queue edition):** วันนี้ (today's queue: check-in, call in, done),
@@ -106,8 +110,10 @@ docs/                     this file, design notes (docs/design/), deployment gui
   appointment details (move, cancel, message the family),
   ตั้งค่า (settings): dentists (photos, treatments with kids/adults per
   treatment, weekly hours, leave), services (price, show/hide price, length),
-  opening hours and holidays, chairs, how far ahead families may book, clinic
-  info.
+  opening hours and holidays, chairs, online booking rules (how far ahead,
+  book-before hours, cancel-before hours, day-queue places per day), clinic
+  info. วันนี้ also lists the day's queue sign-ups (tick in when they arrive),
+  and pain/emergency notes show in red on the queue and schedule.
 - **Full edition (built, not live yet):** cashier and receipts (PromptPay,
   deposits, insurance claims, doctor fees), patient file and dental chart,
   treatment plans and signatures, stock and labs, reports, LINE chat inbox,
@@ -117,7 +123,7 @@ docs/                     this file, design notes (docs/design/), deployment gui
 
 | Command | What it proves | Size |
 |---|---|---|
-| `pnpm e2e:test` | The whole booking flow end to end: book, see, staff assign, double-booking refused, kids/adults rules, 1-hour treatments, cancel, booking window, batched availability | 48 checks |
+| `pnpm e2e:test` | The whole booking flow end to end: book, see, staff assign, double-booking refused, kids/adults rules, 1-hour treatments, cancel, booking window, batched availability, book-before / cancel-before, urgent notes, day queue | 65 checks |
 | `pnpm db:test` | Database behaviour: seed, slots, holidays, holds, queue, walk-ins | 28 checks |
 | `pnpm concurrency:test` | 30 simultaneous bookings and payments: no double booking, no overpayment, retries are safe | 15 checks |
 | `pnpm test` | Unit tests: billing maths, Thai baht text, PromptPay QR, slots, age rules | 16 tests |

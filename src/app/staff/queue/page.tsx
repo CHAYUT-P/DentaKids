@@ -12,6 +12,7 @@ import { goStaff } from "@/lib/staffNav";
 import { useStaffUser } from "@/lib/staffUser";
 import { IconCheck, IconPhone, IconWalkIn } from "@/components/staff/shell/staffIcons";
 import { AgeTag } from "@/components/staff/shell/AgeTag";
+import { UrgentNote } from "@/components/staff/shell/UrgentNote";
 
 /**
  * วันนี้ — today's queue in two groups. ยังไม่มา: bookings not here yet, by
@@ -39,9 +40,13 @@ const fmtMinutes = (m: number) => {
   return rest ? `${h} ชม. ${rest} นาที` : `${h} ชม.`;
 };
 
+type DayQueueEntry = ReturnType<typeof useStaff>["dayQueue"][number];
+
 type Row =
   | { kind: "booking"; at: string; appt: StaffAppointment }
-  | { kind: "walkin"; at: string; entry: WaitlistEntry };
+  | { kind: "walkin"; at: string; entry: WaitlistEntry }
+  /** signed up on the website for today's queue, no fixed time, not here yet */
+  | { kind: "dayq"; at: string; entry: DayQueueEntry };
 
 /** statuses that mean the family is (or was) here today */
 const HERE: StaffAppointment["status"][] = ["arrived", "in_chair", "completed"];
@@ -50,7 +55,7 @@ const HERE: StaffAppointment["status"][] = ["arrived", "in_chair", "completed"];
 type Stage = { label: string; tone: "wait" | "chair" | "pay" | "paid"; bill?: number };
 
 export default function StaffTodayPage() {
-  const { today, appointments, waitlist, dentists, setQueueStatus, showToast, edition } = useStaff();
+  const { today, appointments, waitlist, dayQueue, setDayQueueStatus, dentists, setQueueStatus, showToast, edition } = useStaff();
   const canPay = useStaffUser().can("cashier");
   const full = edition === "full";
 
@@ -122,19 +127,20 @@ export default function StaffTodayPage() {
     [appointments, today],
   );
 
-  /* not here yet: by booked time, no-shows sink to the bottom */
-  const waitingRows = useMemo<Row[]>(
-    () =>
-      todays
-        .filter((a) => !HERE.includes(a.status))
-        .sort((a, b) => {
-          const na = a.status === "no_show" ? 1 : 0;
-          const nb = b.status === "no_show" ? 1 : 0;
-          return na - nb || (a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
-        })
-        .map((appt): Row => ({ kind: "booking", at: appt.time, appt })),
-    [todays],
-  );
+  /* today's day-queue sign-ups (no fixed time) that haven't arrived */
+  const queuedToday = useMemo(() => dayQueue.filter((e) => e.visitDate === today), [dayQueue, today]);
+
+  /* not here yet: by booked time, then the no-fixed-time queue in sign-up
+     order, no-shows sink to the bottom */
+  const waitingRows = useMemo<Row[]>(() => {
+    const booked = todays.filter((a) => !HERE.includes(a.status));
+    const byTime = (a: StaffAppointment, b: StaffAppointment) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
+    return [
+      ...booked.filter((a) => a.status !== "no_show").sort(byTime).map((appt): Row => ({ kind: "booking", at: appt.time, appt })),
+      ...queuedToday.map((entry): Row => ({ kind: "dayq", at: "", entry })),
+      ...booked.filter((a) => a.status === "no_show").sort(byTime).map((appt): Row => ({ kind: "booking", at: appt.time, appt })),
+    ];
+  }, [todays, queuedToday]);
 
   /* here: checked-in bookings and walk-ins, in the order they arrived */
   const hereRows = useMemo<Row[]>(
@@ -149,7 +155,7 @@ export default function StaffTodayPage() {
   );
 
   const arrived = todays.filter((a) => HERE.includes(a.status)).length;
-  const notYet = todays.filter((a) => a.status === "confirmed").length;
+  const notYet = todays.filter((a) => a.status === "confirmed").length + queuedToday.length;
   const walkins = waitlist.length;
 
   const toggle = (a: StaffAppointment) => {
@@ -161,8 +167,47 @@ export default function StaffTodayPage() {
     }
   };
 
-  /** one row — a booking (with its tick) or a walk-in (already here) */
+  /** one row — a booking (with its tick), a day-queue sign-up (with its tick)
+   *  or a walk-in (already here) */
   const renderRow = (r: Row) => {
+          if (r.kind === "dayq") {
+            const q = r.entry;
+            return (
+              <div key={`q-${q.id}`} className="today-row dayq" role="listitem">
+                <span className="tr-time tr-time-open">ไม่ระบุ</span>
+                <div className="tr-main">
+                  <span className="tr-name">{q.childName}</span>
+                  <span className="tr-sub">{tr.name(q.treatmentKey)} · รอคิวว่าง (ไม่ระบุเวลา)</span>
+                  <span className="tr-meta">
+                    <IconPhone size={11} /> {q.phone}
+                    {q.lineName ? <span className="line-tag">LINE · {q.lineName}</span> : null}
+                    <AgeTag group={q.ageGroup} />
+                    <span className="tr-ref">{q.ref}</span>
+                  </span>
+                  <UrgentNote note={q.note} />
+                </div>
+                <button
+                  type="button"
+                  className="tr-tick"
+                  onClick={() => void setDayQueueStatus(q.id, "waiting")}
+                  title="เช็คอินเมื่อมาถึง — จะย้ายไปอยู่ในคิว มาแล้ว"
+                >
+                  <IconCheck size={20} />
+                  <span>เช็คอิน</span>
+                </button>
+                <button
+                  type="button"
+                  className="tr-cancel"
+                  onClick={() => {
+                    if (confirm(`ยกเลิกคิวรอของ ${q.childName}?`)) void setDayQueueStatus(q.id, "cancelled");
+                  }}
+                  title="ผู้ปกครองแจ้งยกเลิก"
+                >
+                  ยกเลิก
+                </button>
+              </div>
+            );
+          }
           if (r.kind === "walkin") {
             const w = r.entry;
             return (
@@ -183,6 +228,7 @@ export default function StaffTodayPage() {
                       </>
                     ) : null}
                   </span>
+                  <UrgentNote note={w.notes} />
                 </div>
                 {full ? stageStrip(stageOf(w.status, undefined, w.id), `w-${w.id}`) : null}
                 <span className="tr-tick done" aria-label={`มาแล้ว ${w.arrivedAt} น.`}>
@@ -219,6 +265,7 @@ export default function StaffTodayPage() {
                   <AgeTag group={a.ageGroup} />
                   <span className="tr-ref">{a.ref}</span>
                 </span>
+                <UrgentNote note={a.notes} />
               </button>
               {full && here ? stageStrip(stageOf(a.status, a.id), `a-${a.id}`) : null}
               {noShow ? (
