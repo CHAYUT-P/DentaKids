@@ -128,7 +128,9 @@
 }
 .fi {
   font: inherit;
-  font-size: 14px;
+  /* 16px or more: iPhones (and LINE's in-app browser) zoom the page in when a
+     smaller box is tapped */
+  font-size: 16px;
   color: var(--ink);
   background: #fff;
   border: 1px solid var(--line);
@@ -1711,3 +1713,10 @@ textarea.fi { resize: vertical; min-height: 56px; line-height: 1.5; }
 }
 .pSoon.none { background: #f4f0f7; color: var(--muted); }
 .pDays { font-size: 11px; color: var(--ink-3); }
+
+/* privacy notice */
+.privacyList { margin: 0 0 8px; padding-left: 18px; white-space: normal; }
+.privacyList li + li { margin-top: 2px; }
+.privacyLink { color: var(--rose-deep); text-decoration: none; }
+.consentLine { margin: 6px 10px 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.consentLine a { color: var(--rose-deep); }

@@ -90,10 +90,14 @@ Everything runs on one server with Docker: Postgres, the app, and Caddy
    builds and starts everything, applies schema changes, and sets the daily
    LINE reminders (18:00 / 07:00) and a nightly database backup
    (`deploy/backup.sh` → `/opt/dentakids/backups`, newest 14 good copies;
-   results in `backups/backup.log`). **These sit on the same disk as the
-   database**, so also copy them off the server (e.g. a weekly download to the
-   clinic PC, or `rclone` to Google Drive / Cloudflare R2), and try restoring
-   one once (`gunzip -c db-….sql.gz | psql`) so you know it works.
+   results in `backups/backup.log`, readable by root only). The server clock
+   is set to UTC, which the reminder times assume.
+   **Off-site copy:** the backups sit on the same disk as the database, so
+   connect a second place once: on the server run `rclone config` (Google
+   Drive or Cloudflare R2), then set `BACKUP_REMOTE=<remote>:<folder>` in
+   `.env.production`. Every nightly backup is then copied there too (60 days
+   kept). Try restoring one once (`gunzip -c db-….sql.gz | psql`) so you know
+   it works.
 5. Point LINE at the new address: LIFF endpoint `https://<domain>/` and webhook
    `https://<domain>/api/line/webhook`. Rebuild the staff app with
    `VITE_API_URL=https://<domain>`.

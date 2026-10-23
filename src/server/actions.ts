@@ -278,9 +278,15 @@ export async function holdSlot(input: {
   dentistId: number | null;
   /** who it's for — "kid" (under 12) or "adult" */
   ageGroup?: AgeGroup | null;
-}): Promise<{ ok: boolean; token?: string; expiresAt?: string }> {
+  /** LIFF ID token — a hold needs a signed-in family, one hold per account */
+  lineIdToken?: string;
+}): Promise<{ ok: boolean; token?: string; expiresAt?: string; error?: "line" }> {
   if (await limited("hold", 30, 600)) return { ok: false };
   if (!input.date || !input.time || !input.treatmentKey) return { ok: false };
+  // only a verified LINE account may hold a time (holds make slots look
+  // taken to everyone else for 10 minutes)
+  const identity = await patientIdentity(input.lineIdToken);
+  if (!identity && process.env.LINE_LOGIN_CHANNEL_ID) return { ok: false, error: "line" };
   const { isBookableTreatment } = await import("@/server/queries");
   if (!(await isBookableTreatment(input.treatmentKey))) return { ok: false };
   const group = isAgeGroup(input.ageGroup) ? input.ageGroup : null;
@@ -295,6 +301,7 @@ export async function holdSlot(input: {
     treatmentKey: input.treatmentKey,
     dentistId: input.dentistId,
     durationMin: await treatmentDuration(input.treatmentKey),
+    owner: identity?.userId ?? null,
   });
   if (!hold) return { ok: false }; // an active hold landed mid-flight
   return { ok: true, token: hold.token, expiresAt: hold.expiresAt.toISOString() };

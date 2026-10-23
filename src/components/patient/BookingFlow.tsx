@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import Link from "next/link";
 
 import type { Dentist } from "@/data/dentists";
 import { iconGroups, type IconKey } from "@/data/icons";
@@ -597,7 +598,7 @@ export function BookingFlow(props: BookingFlowProps) {
     if (!treatment || !date) return;
     const dentistId = dentist ? (dentists.find((d) => d.slug === dentist)?.id ?? null) : null;
     const mine = holdSeq.current;
-    holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId, ageGroup: group })
+    holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId, ageGroup: group, lineIdToken: line.token ?? undefined })
       .then((r) => {
         if (mine !== holdSeq.current) {
           // the family has tapped something else since — let this slot go
@@ -608,7 +609,8 @@ export function BookingFlow(props: BookingFlowProps) {
           setHoldToken(r.token);
         } else {
           setTime(null);
-          setBookErr(t.booking.slotTaken);
+          setLineErr(r.error === "line");
+          setBookErr(r.error === "line" ? t.booking.errLine : t.booking.slotTaken);
         }
       })
       .catch(() => {
@@ -1070,6 +1072,11 @@ export function BookingFlow(props: BookingFlowProps) {
                 ) : null}
                 <p className="hint">{t.booking.contactHint}</p>
               </div>
+              <p className="consentLine">
+                {t.booking.consentBefore}
+                <Link href="/privacy">{t.booking.consentLink}</Link>
+                {t.booking.consentAfter}
+              </p>
 
               <div className="stickyBar">
                 <div className="sbText">

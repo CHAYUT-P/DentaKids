@@ -7,6 +7,10 @@ APP=/opt/dentakids
 cd "$APP"
 say() { printf '\n\033[1;35m▸ %s\033[0m\n' "$*"; }
 
+# the reminder jobs below are written in UTC (11:00 UTC = 18:00 in Bangkok);
+# a server set to Bangkok time would send the morning reminder at midnight
+timedatectl set-timezone UTC 2>/dev/null || true
+
 say "1/7  Docker"
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
@@ -55,7 +59,9 @@ $DC up -d app caddy
 $DC ps
 
 say "7/7  Reminders + nightly backup"
-mkdir -p backups
+mkdir -p backups && chmod 700 backups
+# off-site copies of the backups (optional, see docs/DEPLOYMENT.md): rclone
+command -v rclone >/dev/null 2>&1 || curl -fsSL https://rclone.org/install.sh | bash >/dev/null 2>&1 || true
 cat > /etc/cron.d/dentakids <<CRON
 # LINE reminders — 18:00 and 07:00 Bangkok (the server clock is UTC); called
 # inside the app container, so HTTPS redirects never get in the way

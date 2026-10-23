@@ -23,6 +23,22 @@ async function main() {
     if (cond) { passed++; console.log(`  ✓ ${name}`); }
     else { failed++; console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`); }
   };
+  /** a day and time that can really be booked — found by trying a hold (then
+   *  letting it go), so the test never depends on which weekday it runs on */
+  const bookable = async (from: string, treatmentKey: string, dentistId: number | null, slug?: string) => {
+    for (let i = 0; i < 21; i++) {
+      const day = addDays(from, i);
+      const times = [...new Set((await queries.slotsForDate(day)).filter((x) => !x.taken && (!slug || x.dentistSlug === slug)).map((x) => x.time))].sort();
+      for (const time of times) {
+        const h = await actions.holdSlot({ date: day, time, treatmentKey: treatmentKey as never, dentistId, ageGroup: "kid", lineIdToken: "e2e-probe" });
+        if (h.ok && h.token) {
+          await actions.releaseSlotHold(h.token);
+          return { day, time };
+        }
+      }
+    }
+    throw new Error(`no bookable time for ${treatmentKey} from ${from}`);
+  };
 
   // start from the default booking rules (a run that stopped early could
   // have left test values), and put the clinic's own back at the end
@@ -265,9 +281,7 @@ async function main() {
   console.log("\n— 11. Book-before, cancel-before, cancel message —");
   const rulesBefore = rulesAtStart;
   await actions.staffUpdateBookingRules({ windowDays: 30, leadHours: 1, cancelHours: 0 });
-  let soonDay = addDays(today, 1);
-  while (![2, 3, 5, 6].includes(weekdayIndex(soonDay))) soonDay = addDays(soonDay, 1);
-  const soonTime = [...new Set((await queries.slotsForDate(soonDay)).filter((x) => !x.taken).map((x) => x.time))].sort()[0];
+  const { day: soonDay, time: soonTime } = await bookable(addDays(today, 1), "fluoride", null);
   await actions.staffUpdateBookingRules({ leadHours: 168 });
   const tooSoon = await actions.bookAppointment({ ageGroup: "kid",
     date: soonDay, time: soonTime, treatmentKey: "fluoride", dentistId: null,
@@ -336,6 +350,18 @@ async function main() {
   for (const a of await queries.listAppointmentsBetween(rDay, rDay)) {
     if (a.childName.startsWith("คืนนัด")) await queries.deleteAppointment(a.id);
   }
+
+  console.log("\n— 13. One hold at a time per family —");
+  const { day: hDay } = await bookable(addDays(today, 3), "checkup", naree.id, "naree");
+  const hTimes = [...new Set((await queries.slotsForDate(hDay)).filter((x) => !x.taken && x.dentistSlug === "naree").map((x) => x.time))].sort();
+  const h1 = await actions.holdSlot({ date: hDay, time: hTimes[0], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-fam" });
+  const h2 = await actions.holdSlot({ date: hDay, time: hTimes[1], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-fam" });
+  ok("a family can hold a time", h1.ok && h2.ok);
+  const heldNow = (await queries.slotsForDate(hDay)).filter((x) => x.dentistSlug === "naree" && x.taken).map((x) => x.time);
+  ok("holding another time lets the first one go", !heldNow.includes(hTimes[0]) && heldNow.includes(hTimes[1]), heldNow.join(","));
+  const other = await actions.holdSlot({ date: hDay, time: hTimes[0], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-other" });
+  ok("…so another family can hold it", other.ok);
+  for (const t of [h2.token, other.token]) if (t) await actions.releaseSlotHold(t);
 
   await actions.staffUpdateBookingRules(rulesBefore);
 

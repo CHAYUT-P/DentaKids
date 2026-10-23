@@ -829,9 +829,14 @@ export async function createHold(input: {
   treatmentKey: string;
   /** how long the treatment takes — the hold covers every slot it runs into */
   durationMin?: number;
+  /** the LINE account asking: its earlier hold (if any) is let go first */
+  owner?: string | null;
 }): Promise<{ token: string; expiresAt: Date } | null> {
   // prune lapsed rows so the table stays small and the upsert can reuse them
   await db.delete(slotHold).where(lt(slotHold.expiresAt, new Date()));
+  // one hold at a time per family: a new pick replaces their previous one, so
+  // nobody can keep many times looking taken
+  if (input.owner) await db.delete(slotHold).where(eq(slotHold.owner, input.owner));
 
   const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000);
@@ -841,6 +846,7 @@ export async function createHold(input: {
     date: input.date,
     time: input.time,
     durationMin: input.durationMin ?? SLOT_MIN,
+    owner: input.owner ?? null,
     expiresAt,
   };
   const rows =
@@ -851,7 +857,14 @@ export async function createHold(input: {
           .values({ ...base, token })
           .onConflictDoUpdate({
             target: [slotHold.dentistId, slotHold.date, slotHold.time],
-            set: { token, expiresAt, treatmentKey: input.treatmentKey, durationMin: input.durationMin ?? SLOT_MIN, createdAt: new Date() },
+            set: {
+              token,
+              expiresAt,
+              treatmentKey: input.treatmentKey,
+              durationMin: input.durationMin ?? SLOT_MIN,
+              owner: input.owner ?? null,
+              createdAt: new Date(),
+            },
             // only a lapsed hold may be replaced — an active one wins
             setWhere: lt(slotHold.expiresAt, new Date()),
           })

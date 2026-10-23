@@ -335,11 +335,14 @@ export const slotHold = pgTable(
     time: text("time").notNull(), // HH:MM — the start; a longer treatment holds the slots after it too
     /** how long the held treatment takes — a 60-minute hold covers two half-hour slots */
     durationMin: integer("duration_min").notNull().default(30),
+    /** the LINE account holding it — one hold at a time per account */
+    owner: text("owner"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("slot_hold_token_idx").on(t.token),
+    index("slot_hold_owner_idx").on(t.owner),
     uniqueIndex("slot_hold_slot_idx").on(t.dentistId, t.date, t.time),
     index("slot_hold_date_idx").on(t.date),
   ],
