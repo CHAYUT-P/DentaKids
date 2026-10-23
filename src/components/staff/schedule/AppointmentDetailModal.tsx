@@ -4,8 +4,8 @@ import React, { useState } from "react";
 import { useTreatments } from "@/lib/treatmentsContext";
 import { useStaff, type StaffAppointment } from "@/lib/staffStore";
 import { useT } from "@/i18n/lang";
-import { fmtLong, thaiDate, weekdayIndex } from "@/lib/dates";
-import { dentistDayTimes, timeRange } from "@/lib/slots";
+import { fmtLong, thaiDate } from "@/lib/dates";
+import { timeRange } from "@/lib/slots";
 import {
   IconX,
   IconCheck,
@@ -22,7 +22,7 @@ import {
 import { PatientFileButton } from "@/components/staff/patients/PatientFileView";
 import { AgeTag } from "@/components/staff/shell/AgeTag";
 import { CallFamilyNotice } from "@/components/staff/shell/CallFamilyNotice";
-import { DateField } from "@/components/staff/shell/DateField";
+import { pickIsValid, SlotPicker, useGridFor } from "@/components/staff/schedule/SlotPicker";
 
 /** quick reasons the desk can drop into the message to the family */
 const REASONS = ["คุณหมอติดธุระ", "คุณหมอลา", "คลินิกปิดทำการ"];
@@ -105,7 +105,7 @@ export function AppointmentDetailModal({
   appointment,
   onClose,
 }: AppointmentDetailModalProps) {
-  const { edition, today, dentists, patients, updateStatus, setQueueStatus, rescheduleAppointment, updateAppointment, assignDentist, createPatient, showToast, messageFamily, onLeave } = useStaff();
+  const { edition, today, dentists, patients, updateStatus, setQueueStatus, rescheduleAppointment, updateAppointment, assignDentist, createPatient, showToast, messageFamily } = useStaff();
   const tr = useTreatments();
   const dict = useT();
 
@@ -128,7 +128,11 @@ export function AppointmentDetailModal({
   const treatmentName = tr.name(appointment.treatmentKey);
   const day = (iso: string) => `วัน${fmtLong(dict, iso, "th")}`;
   const newDentistName = dentists.find((d) => d.slug === newDentist)?.text.th.name;
-  const newDateLeave = newDentist ? onLeave(newDentist, newDate) : undefined;
+  /** the move: day, time and dentist picked together from what is free */
+  const gridFor = useGridFor(appointment.durationMin, appointment.id);
+  const unchanged =
+    newDate === appointment.date && newTime === appointment.time && newDentist === appointment.dentistSlug;
+  const moveOk = unchanged || pickIsValid(gridFor(newDate), { date: newDate, time: newTime, dentistSlug: newDentist });
 
   const template =
     panel === "cancel"
@@ -245,17 +249,9 @@ export function AppointmentDetailModal({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // the new dentist's hours on the new day, room left for the whole treatment
-  const shiftTimes = dentistDayTimes(
-    dentists.find((d) => d.slug === newDentist)?.shifts,
-    weekdayIndex(newDate),
-    appointment.durationMin,
-  );
-  const times = shiftTimes.includes(newTime) ? shiftTimes : [...shiftTimes, newTime].sort();
-
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card modal-card-lg" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-card modal-card-lg${panel === "reschedule" ? " sp-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="modal-header" style={{ padding: "18px 24px" }}>
           <div>
@@ -743,48 +739,16 @@ export function AppointmentDetailModal({
               <div style={{ fontWeight: "700", fontSize: "14.5px", color: "var(--staff-primary)" }}>
                 เลื่อนวัน/เวลานัดหมาย
               </div>
-              <div className="form-row-2">
-                <div className="form-group">
-                  <label>วันที่ใหม่</label>
-                  <DateField value={newDate} onChange={setNewDate} min={today} ariaLabel="วันที่ใหม่" />
-                </div>
-                <div className="form-group">
-                  <label>เวลาใหม่</label>
-                  <select
-                    className="form-control"
-                    value={newTime}
-                    onChange={(e) => setNewTime(e.target.value)}
-                  >
-                    {times.map((t) => (
-                      <option key={t} value={t}>
-                        {t} น.
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="form-group">
-                <label>เปลี่ยนแพทย์</label>
-                <select
-                  className="form-control"
-                  value={newDentist}
-                  onChange={(e) => setNewDentist(e.target.value)}
-                >
-                  {appointment.dentistId === null ? (
-                    <option value="">— รอจัดแพทย์ (ยังไม่เลือก) —</option>
-                  ) : null}
-                  {dentists.map((d) => (
-                    <option key={d.slug} value={d.slug}>
-                      {d.text.th.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {newDateLeave ? (
-                <div className="ap-warn">
-                  {newDentistName} ลาวันนี้{newDateLeave.note ? ` (${newDateLeave.note})` : ""} — เลือกวันอื่นหรือแพทย์ท่านอื่น
-                </div>
-              ) : null}
+              <SlotPicker
+                value={{ date: newDate, time: newTime, dentistSlug: newDentist }}
+                onChange={(p) => {
+                  setNewDate(p.date);
+                  setNewTime(p.time);
+                  setNewDentist(p.dentistSlug);
+                }}
+                durationMin={appointment.durationMin}
+                excludeId={appointment.id}
+              />
               <LineCompose
                 hasLine={hasLine}
                 phone={appointment.phone}
@@ -809,6 +773,7 @@ export function AppointmentDetailModal({
                 <button
                   type="button"
                   className="btn-primary-staff"
+                  disabled={!moveOk}
                   onClick={handleSaveReschedule}
                 >
                   {hasLine && notify ? "บันทึกและส่งข้อความ" : "บันทึกการเลื่อนนัด"}

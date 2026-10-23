@@ -7409,3 +7409,124 @@ button.status-pill {
 .update-bar .update-notes {
   color: var(--staff-ink-muted);
 }
+
+/* ── time picker for new / moved appointments (SlotPicker) ───────────────── */
+.modal-card.booking-card.wide { max-width: 920px; }
+
+.slot-picker { display: flex; flex-direction: column; gap: 12px; }
+
+.sp-days { display: flex; align-items: stretch; gap: 6px; }
+.sp-nav {
+  flex: none;
+  width: 32px;
+  border: 1px solid var(--staff-border);
+  border-radius: 10px;
+  background: var(--staff-surface);
+  color: var(--staff-ink-2);
+  font-size: 18px;
+  cursor: pointer;
+}
+.sp-nav:disabled { opacity: 0.35; cursor: default; }
+.sp-day {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 2px;
+  border: 1px solid var(--staff-border);
+  border-radius: 12px;
+  background: var(--staff-surface);
+  color: var(--staff-ink-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sp-day b { font-size: 18px; font-weight: 600; color: var(--staff-ink); }
+.sp-day.on { background: var(--staff-primary); border-color: var(--staff-primary); color: #fff; }
+.sp-day.on b { color: #fff; }
+.sp-day.full span:last-child { color: var(--staff-accent-rose); }
+.sp-day.closed { background: var(--staff-surface-subtle); border-style: dashed; cursor: default; }
+.sp-day.closed b { color: var(--staff-ink-muted); }
+.sp-jump { flex: none; width: 150px; }
+
+.sp-grid {
+  display: grid;
+  gap: 4px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.sp-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 2px 6px;
+  background: var(--staff-surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--staff-ink);
+  text-align: center;
+}
+.sp-head span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-head small { font-size: 11px; font-weight: 400; color: var(--staff-ink-muted); }
+.sp-head.leave small { color: var(--staff-accent-rose); }
+.sp-time { font-size: 12.5px; color: var(--staff-ink-muted); padding-top: 9px; }
+
+.sp-cell {
+  height: 34px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--staff-border-strong);
+  border-radius: 8px;
+  background: var(--staff-surface);
+  color: var(--staff-ink);
+  font: inherit;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sp-cell.free:hover { background: var(--staff-surface-hover); }
+.sp-cell.offshift {
+  border-style: dashed;
+  color: var(--staff-ink-muted);
+  background: var(--staff-surface-subtle);
+}
+.sp-cell.booked,
+.sp-cell.cont {
+  background: var(--staff-status-confirmed-bg);
+  border-color: var(--staff-status-confirmed-border);
+  color: var(--staff-status-confirmed-fg);
+  cursor: default;
+}
+.sp-cell.cont { opacity: 0.7; }
+.sp-cell.self {
+  border: 1.5px dashed var(--staff-rose-deep);
+  color: var(--staff-accent-rose);
+  background: var(--staff-surface);
+}
+.sp-cell.blocked,
+.sp-cell.past {
+  background: repeating-linear-gradient(45deg, var(--staff-surface-subtle), var(--staff-surface-subtle) 4px, var(--staff-bg) 4px, var(--staff-bg) 8px);
+  border-color: var(--staff-border);
+  cursor: default;
+}
+.sp-cell.on { background: var(--staff-rose-deep); border-color: var(--staff-rose-deep); color: #fff; font-weight: 600; }
+
+.sp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--staff-ink-muted); }
+.sp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sp-key { display: inline-block; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--staff-border-strong); }
+.sp-key.offshift { border-style: dashed; background: var(--staff-surface-subtle); }
+.sp-key.booked { background: var(--staff-status-confirmed-bg); border-color: var(--staff-status-confirmed-border); }
+.sp-closed,
+.sp-hint { font-size: 13px; color: var(--staff-ink-muted); }
+.sp-closed { padding: 18px; text-align: center; border: 1px dashed var(--staff-border); border-radius: 12px; }
+.modal-card.modal-card-lg.sp-wide { max-width: 920px; }
+/* the corner above the time labels stays with the dentist names */
+.sp-corner { position: sticky; top: 0; z-index: 1; background: var(--staff-surface); }
