@@ -23,3 +23,6 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 # Thai national ID cards through any PC/SC smart-card reader (WinSCard on Windows, PCSC on macOS)
 pcsc = "2"
+# auto-update: checks the published latest.json, verifies the signature, installs, restarts
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

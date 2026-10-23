@@ -4,6 +4,7 @@ import { HashRouter, Navigate, Route, Routes, useNavigate, useParams } from "rea
 import { CrashScreen } from "./components/CrashScreen";
 import { LoginScreen } from "./components/LoginScreen";
 import { StaffSidebar } from "./components/StaffSidebar";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { API_BASE, ensureStaffToken, hasStaffToken, staffBootstrap, type StaffBootstrap } from "./api";
 import { STAFF_EDITION } from "./edition";
 import { installErrorReporter } from "@/lib/clientErrors";
@@ -36,6 +37,17 @@ import "@/app/staff/staff.css";
  * every mutation exactly like the web.
  */
 export default function App() {
+  // looking for updates works on every screen — the PIN screen included, so a
+  // PC whose sign-in broke can still update itself
+  return (
+    <>
+      <Screens />
+      <UpdateBanner />
+    </>
+  );
+}
+
+function Screens() {
   const [authed, setAuthed] = useState(hasStaffToken());
   const [silentFailed, setSilentFailed] = useState(false);
   const [initial, setInitial] = useState<StaffBootstrap | null>(null);

@@ -148,8 +148,10 @@ pnpm --dir apps/staff-desktop dev    # staff app UI in a browser (queue edition)
 **Deploying:** push to `main` and Vercel deploys the website. **Before**
 pushing code that adds database columns, run `DATABASE_URL=<live> pnpm db:push`
 (additive changes only), otherwise the live site breaks. The Windows staff app
-is built on GitHub: Actions → *Staff app (Windows)* → Run workflow → install
-the `.exe` from Releases on each PC.
+is built on GitHub: Actions → *Staff app (Windows)* → Run workflow. Installed
+PCs then offer the update themselves ("มีเวอร์ชันใหม่"); a new PC installs the
+`.exe` from the public CHAYUT-P/DentaKids-releases → Releases
+([design/07](design/07-auto-update.md), including the one-time key setup).
 
 ## 8. Reliability roadmap
 
@@ -161,6 +163,7 @@ the `.exe` from Releases on each PC.
 | 4. Live updates instead of 20-second polling | ✅ Done | [design/04](design/04-live-updates.md). A save shows on other screens in ~0.1 s instead of 10 s; idle traffic 566 MB/h → 2.4 KB/h per screen |
 | 5. HTTP load test (k6) | ✅ Done (local) | [design/05](design/05-load-test.md). 200 families on one slot → 1 booking, 0 errors. Next: run it against a staging copy |
 | 6. Fix what the measurements found: availability in one batch, slimmer staff download, booking window up to a year | ✅ Done | [design/06](design/06-faster-availability.md). One server: ~30 → ~60 families/s at p95 < 60 ms; staff download 3.2 MB → 0.5 MB |
+| 7. Auto-update for the clinic PCs (signed, staff tap to install) | ✅ Built, needs one-time setup | [design/07](design/07-auto-update.md) |
 
 ## 9. Things to know before changing anything
 

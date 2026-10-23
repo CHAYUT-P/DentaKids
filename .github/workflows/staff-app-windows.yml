@@ -1,12 +1,18 @@
-# Builds the staff desktop app (Denta Kids Staff) for Windows and publishes the
-# installer as a GitHub Release, so a clinic PC can download and run it.
+# Builds the staff desktop app (Denta Kids Staff) for Windows, publishes it,
+# and makes it the version clinic PCs update to (docs/design/07-auto-update.md).
 #
 # Run it from GitHub → Actions → "Staff app (Windows)" → Run workflow, or with
-#   gh workflow run staff-app-windows.yml
-# The installer appears under Releases as "Denta Kids Staff <version>".
+#   gh workflow run staff-app-windows.yml -f edition=queue -f notes="what changed"
 #
-# No staff PIN is baked into this build: the app asks for the clinic PIN the
-# first time it opens on each PC.
+# This repository is private, so installers go to the public repository
+# CHAYUT-P/DentaKids-releases (installers only — no code, no secrets: no PIN
+# is baked in; the app asks for the clinic PIN the first time on each PC).
+# Every PC already installed checks <edition>/latest.json there and offers
+# the update; a new PC downloads the .exe from that repository's Releases.
+#
+# Needs three secrets in this repository (one-time setup, see design/07):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD — signs updates
+#   RELEASES_TOKEN — a fine-grained token allowed to write to DentaKids-releases
 name: Staff app (Windows)
 
 on:
@@ -17,9 +23,18 @@ on:
         type: choice
         options: [queue, full]
         default: queue
+      notes:
+        description: "What changed (shown to staff in the update bar)"
+        type: string
+        default: "ปรับปรุงและแก้ไขข้อผิดพลาด"
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  RELEASES_REPO: DentaKids-releases
+  VERSION: 0.1.${{ github.run_number }}
+  TAG: staff-windows-${{ inputs.edition }}-${{ github.run_number }}
 
 jobs:
   windows:
@@ -43,9 +58,10 @@ jobs:
       - name: Install packages
         run: pnpm install --frozen-lockfile
 
-      # every build gets its own version (0.1.<run>) so Windows installs it
-      # over the previous one as an update
-      - name: Set version
+      # every build gets its own, higher version (0.1.<run>) — that is what
+      # tells an installed app there is something newer; and only builds made
+      # here produce the signed update files
+      - name: Set version, turn on update files
         shell: bash
         run: |
           node -e '
@@ -53,25 +69,65 @@ jobs:
             for (const f of ["apps/staff-desktop/src-tauri/tauri.conf.json", "apps/staff-desktop/src-tauri/tauri.full.conf.json"]) {
               if (!fs.existsSync(f)) continue;
               const c = JSON.parse(fs.readFileSync(f, "utf8"));
-              if (c.version) c.version = "0.1.${{ github.run_number }}";
+              if (c.version) c.version = process.env.VERSION;
+              if (f.endsWith("tauri.conf.json") && !f.includes(".full.")) {
+                c.bundle = { ...c.bundle, createUpdaterArtifacts: true };
+              }
               fs.writeFileSync(f, JSON.stringify(c, null, 2));
             }
           '
 
-      - name: Build and publish the installer
+      - name: Build, sign and publish the installer
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/staff-desktop
           tauriScript: pnpm tauri
           args: ${{ inputs.edition == 'full' && '--bundles nsis --config src-tauri/tauri.full.conf.json' || '--bundles nsis' }}
-          tagName: staff-windows-${{ inputs.edition }}-${{ github.run_number }}
-          releaseName: "Denta Kids Staff (Windows, ${{ inputs.edition }}) 0.1.${{ github.run_number }}"
+          owner: CHAYUT-P
+          repo: ${{ env.RELEASES_REPO }}
+          releaseCommitish: main
+          tagName: ${{ env.TAG }}
+          releaseName: "Denta Kids Staff (Windows, ${{ inputs.edition }}) ${{ env.VERSION }}"
           releaseBody: |
-            Windows installer for the staff app (${{ inputs.edition }} edition).
-            Download the `.exe` below, run it, and open "Denta Kids Staff" from the Start menu.
-            Windows may warn "Windows protected your PC" because the app isn't signed — choose "More info" → "Run anyway".
+            ${{ inputs.notes }}
+
+            Windows installer for the staff app (${{ inputs.edition }} edition). PCs that already have the app update themselves.
+            New PC: download the `.exe` below, run it, and open "Denta Kids Staff" from the Start menu.
+            Windows may warn "Windows protected your PC" because the app isn't signed with a paid certificate — choose "More info" → "Run anyway".
             The first time it opens, type the clinic PIN.
+          includeUpdaterJson: true
           releaseDraft: false
-          prerelease: false
+          # only the queue edition shows as "Latest" on the Releases page
+          prerelease: ${{ inputs.edition == 'full' }}
+
+      # what installed PCs read: <edition>/latest.json on the releases repo's
+      # main branch. Pointing it back at an older version's file is the
+      # rollback for a bad release.
+      - name: Offer this version to the clinic PCs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          EDITION: ${{ inputs.edition }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          gh release download "$TAG" -R "CHAYUT-P/$RELEASES_REPO" -p latest.json -D upd
+          # the staff see these notes in the update bar
+          node -e '
+            const fs = require("fs");
+            const j = JSON.parse(fs.readFileSync("upd/latest.json", "utf8"));
+            j.notes = process.env.NOTES;
+            fs.writeFileSync("upd/latest.json", JSON.stringify(j, null, 2));
+          '
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/CHAYUT-P/${RELEASES_REPO}.git" rel
+          mkdir -p "rel/$EDITION"
+          cp upd/latest.json "rel/$EDITION/latest.json"
+          cd rel
+          git config user.name "dentakids-release"
+          git config user.email "dentakids-release@users.noreply.github.com"
+          git add "$EDITION/latest.json"
+          git commit -m "$EDITION: offer $VERSION"
+          git push

@@ -7437,3 +7437,30 @@ button.status-pill {
   display: inline-flex;
   margin: 0 0 0 4px;
 }
+
+/* desktop app: "a new version is ready" (apps/staff-desktop UpdateBanner) —
+   a card in the corner, so it never moves anything on the screen */
+.update-bar {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 560px;
+  padding: 12px 16px;
+  border: 1px solid var(--staff-border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--staff-shadow-sm);
+  color: var(--staff-ink);
+  font-size: 14px;
+}
+.update-bar .update-text {
+  flex: 1;
+  min-width: 0;
+}
+.update-bar .update-notes {
+  color: var(--staff-ink-muted);
+}
