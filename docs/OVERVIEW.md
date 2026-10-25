@@ -47,7 +47,7 @@ chart, stock, reports, LINE chat) is built but switched off until later.
  │   public          /api/queue, /api/health, /api/client-error, photos       │
  └──────────────┬───────────────────────────────────────┬──────────────────────┘
                 ▼                                       ▼
-        PostgreSQL 16 (Drizzle ORM, 45 tables)     LINE Messaging API + LINE Login
+        PostgreSQL 16 (Drizzle ORM, 48 tables)     LINE Messaging API + LINE Login
         LISTEN/NOTIFY → live updates               (push messages, ID-token check)
 ```
 
@@ -233,9 +233,29 @@ Every staff-visible save calls `revalidateStaff()` → **`notifyChange()`**
   staff tap. A new server must keep working with the previous app version.
   Add fields; never rename or remove what an older app still uses.
 
+### 4.8 History for reports and forecasts
+
+The booking row only says how things stand now. From launch day, two tables
+keep how they got there (`src/server/history.ts`). Nothing reads them yet;
+they're for reports and forecasts once there's real history.
+
+- **`visit_event`**: one row per change to a booking or walk-in. It records
+  when, who (family, staff, or the system's automatic assignment), and the
+  booking before and after: booked, moved (from where), dentist changed,
+  checked in, in the chair, done, no-show, cancelled, deleted.
+  - From this you can work out real treatment lengths, waiting times, how
+    late people cancel and who cancels, and how often bookings move.
+- **`booking_attempt`**: one row each time a family picks a time on the
+  website. The outcome is held, booked, or why it couldn't be held.
+  - Held-but-never-booked = families who gave up.
+  - Refused = times the clinic was too full for (demand it couldn't meet).
+
+Writes are best-effort: a booking never fails because its history line
+couldn't be saved (the error log gets it instead).
+
 ---
 
-## 5. Data model (45 tables, `src/db/schema.ts`)
+## 5. Data model (48 tables, `src/db/schema.ts`)
 
 | Group | Tables | Notes |
 |---|---|---|
@@ -243,8 +263,9 @@ Every staff-visible save calls `revalidateStaff()` → **`notifyChange()`**
 | **Dentists** | `dentist`, `dentist_text` (th/en), `dentist_treat` (treatment + kids/adults), `dentist_shift` (per weekday), `dentist_leave` | Photos stored on `dentist`, served from `/api/dentist-photo/[slug]/[size]` |
 | **Clinic setup** | `treatment` (price, show/hide, length), `clinic_day` (hours), `holiday`, `clinic_info` (phone, LINE, map, address), `clinic_setting` (chairs, booking rules, change counter) | Everything families see comes from these |
 | **Operations** | `waitlist_entry` (walk-ins), `staff_notification`, `rate_limit`, `error_event`, `promotion` | |
-| **People** | `guardian`, `child`, `line_contact`, `line_message` | Patient records are created by staff (full edition); the website stores only name + phone on the booking |
-| **Full edition** | `visit_record`, `invoice`, `invoice_item`, `payment`, `df_rule`, `patient_credit`, `tooth_state`, `tooth_event`, `treatment_plan`, `plan_item`, `medication`, `clinical_doc`, `patient_file`, `recall`, `supplier`, `stock_item`, `stock_move`, `treatment_consumable`, `expense`, `lab_order`, `staff_user`, `audit_log`, `time_clock` | Built, not live yet |
+| **History** | `visit_event`, `booking_attempt` | Every change to a booking or walk-in, and every time picked on the website (§4.8). Never edited |
+| **People** | `guardian`, `child`, `line_contact`, `line_message` | Patient records are created by staff (full edition); the website stores only name + phone on the booking. `child` is any patient (adults too): ID card / passport, prefix, English name, own phone, emergency contact, insurance, the medical-history form + when it was last checked, preferred dentist, archived/merged. `guardian`: second phone, email, ID card, receipt-in-another-name details, how they found the clinic, PDPA consent (when, which version), marketing and photo consent |
+| **Full edition** | `visit_record` (also chief complaint, findings, ICD-10 diagnoses, anaesthetic used, vital signs, behaviour score, next plan, assistant), `perio_exam` (gum chart), `invoice`, `invoice_item`, `payment`, `df_rule`, `patient_credit`, `tooth_state`, `tooth_event`, `treatment_plan`, `plan_item`, `medication`, `clinical_doc`, `patient_file`, `recall`, `supplier`, `stock_item`, `stock_move`, `treatment_consumable`, `expense`, `lab_order`, `staff_user`, `audit_log`, `time_clock` | Built, not live yet. `dentist.license_no` holds the ท. licence number for documents |
 
 Schema changes: edit `schema.ts`, then `pnpm db:push` (local). On a live
 database, push the schema **before** deploying code that needs it.
@@ -352,7 +373,7 @@ can click through booking without LINE.
 | Command | Proves | Size |
 |---|---|---|
 | `pnpm test` | unit: billing maths, baht text, PromptPay QR, slots, age rules, staff availability | 24 |
-| `pnpm e2e:test` | the whole flow: booking, rules, window, kids/adults, 1-hour treatments, moves, cancels, holds, guards | 66 |
+| `pnpm e2e:test` | the whole flow: booking, rules, window, kids/adults, 1-hour treatments, moves, cancels, holds, guards, history | 76 |
 | `pnpm db:test` | database behaviour: slots, holidays, holds, queue, walk-ins | 28 |
 | `pnpm concurrency:test` | 30 requests at once: no double booking, no overpayment, safe retries | 15 |
 | `pnpm typecheck`, `pnpm lint` | types and lint (website, backend, desktop) | — |
@@ -419,6 +440,7 @@ anything else.
 - real clinic data
 - `ALERT_LINE_USER_ID`, UptimeRobot, `rclone config` for off-site backups
 - the clinic approves the privacy text
+- **right before announcing:** `bash deploy/clear-test-data.sh` on the server, once. It removes test bookings, patients, bills and history and keeps the clinic setup (it asks first and saves a backup)
 - check the LINE OA plan (the free plan's 300 messages a month won't cover reminders)
 
 **Before launch (code, at VPS time):** point the staff app at the domain,

@@ -15,6 +15,7 @@ import { agesAllow, isAgeGroup, isTreatAges, type AgeGroup, type TreatAges } fro
 import { coveredTimes, SLOT_MIN } from "@/lib/slots";
 import { clampRule, DEFAULT_RULES, RULE_KEYS, type BookingRules } from "@/lib/bookingRules";
 import { isUrgent } from "@/lib/urgent";
+import { logBooking, SYSTEM } from "@/server/history";
 import { newTreatmentKey, toTreatmentInfo, type TreatmentInfo, type TreatmentKey } from "@/lib/treatments";
 import type { PatientChildInput, PatientUpsertInput, VisitItem } from "@/lib/staffTypes";
 /**
@@ -965,10 +966,11 @@ export async function settlePool(date: string, time: string): Promise<string[]> 
         .update(appointment)
         .set({ dentistId: target.id, updatedAt: new Date() })
         .where(and(eq(appointment.id, oldest.id), ne(appointment.status, "cancelled")))
-        .returning({ ref: appointment.ref });
+        .returning({ ref: appointment.ref, status: appointment.status });
     });
     if (updated.length === 0) break; // taken/cancelled mid-flight — stop, staff sees it
     assigned.push(updated[0].ref);
+    await logBooking(oldest.id, "dentist", SYSTEM, { status: updated[0].status, date, time: oldest.time, dentistId: null }, "any dentist → assigned automatically");
     const d = await dentistName(target.id);
     await db.insert(staffNotification).values({
       type: "online_booking",
@@ -1661,17 +1663,27 @@ export async function addWaitlist(input: {
   treatmentKey: TreatmentKey;
   dentistId?: number | null;
   note?: string;
-}): Promise<void> {
+}): Promise<number> {
   const hhmm = clinicNowHHMM();
-  await db.insert(waitlistEntry).values({
-    childName: input.childName,
-    guardianPhone: (input.guardianPhone ?? "").replace(/\D/g, ""),
-    treatmentKey: input.treatmentKey,
-    dentistId: input.dentistId ?? null,
-    arrivedAt: hhmm,
-    status: "waiting",
-    note: input.note ?? "",
-  });
+  const [row] = await db
+    .insert(waitlistEntry)
+    .values({
+      childName: input.childName,
+      guardianPhone: (input.guardianPhone ?? "").replace(/\D/g, ""),
+      treatmentKey: input.treatmentKey,
+      dentistId: input.dentistId ?? null,
+      arrivedAt: hhmm,
+      status: "waiting",
+      note: input.note ?? "",
+    })
+    .returning({ id: waitlistEntry.id });
+  return row.id;
+}
+
+/** a walk-in's status right now ("" if it's gone) — the history's "before" */
+export async function waitlistStatus(id: number): Promise<string> {
+  const [row] = await db.select({ status: waitlistEntry.status }).from(waitlistEntry).where(eq(waitlistEntry.id, id));
+  return row?.status ?? "";
 }
 
 export async function updateWaitlistStatus(

@@ -32,6 +32,7 @@ import {
   updateWaitlistStatus,
   upsertGuardian,
   clinicNowHHMM,
+  type AppointmentDTO,
   type AppointmentUpdate,
   type ChildInput,
   type CreatePatientInput,
@@ -280,8 +281,11 @@ export async function holdSlot(input: {
   ageGroup?: AgeGroup | null;
   /** LIFF ID token — a hold needs a signed-in family, one hold per account */
   lineIdToken?: string;
+  /** a new booking, or moving one (for the demand log only) */
+  purpose?: "new" | "move";
 }): Promise<{ ok: boolean; token?: string; expiresAt?: string; error?: "line" }> {
   if (await limited("hold", 30, 600)) return { ok: false };
+  if (typeof input.date !== "string" || typeof input.time !== "string" || typeof input.treatmentKey !== "string") return { ok: false };
   if (!input.date || !input.time || !input.treatmentKey) return { ok: false };
   // only a verified LINE account may hold a time (holds make slots look
   // taken to everyone else for 10 minutes)
@@ -290,7 +294,22 @@ export async function holdSlot(input: {
   const { isBookableTreatment } = await import("@/server/queries");
   if (!(await isBookableTreatment(input.treatmentKey))) return { ok: false };
   const group = isAgeGroup(input.ageGroup) ? input.ageGroup : null;
-  if ((await slotVerdict(input.date, input.time, input.treatmentKey, input.dentistId, group)) !== "ok") {
+  // demand, kept for later reports: every pick, and whether it could be held
+  const { logAttempt } = await import("@/server/history");
+  const attempt = (outcome: string) =>
+    logAttempt({
+      date: input.date,
+      time: input.time,
+      dentistId: typeof input.dentistId === "number" ? input.dentistId : null,
+      treatmentKey: input.treatmentKey,
+      ageGroup: group,
+      lineUserId: identity?.userId,
+      purpose: input.purpose === "move" ? "move" : "new",
+      outcome,
+    });
+  const verdict = await slotVerdict(input.date, input.time, input.treatmentKey, input.dentistId, group);
+  if (verdict !== "ok") {
+    await attempt(verdict);
     return { ok: false };
   }
   const { createHold } = await import("@/server/queries");
@@ -303,6 +322,7 @@ export async function holdSlot(input: {
     durationMin: await treatmentDuration(input.treatmentKey),
     owner: identity?.userId ?? null,
   });
+  await attempt(hold ? "held" : "slot_taken");
   if (!hold) return { ok: false }; // an active hold landed mid-flight
   return { ok: true, token: hold.token, expiresAt: hold.expiresAt.toISOString() };
 }
@@ -420,6 +440,10 @@ export async function bookAppointment(input: {
   // the same attempt arrived twice at once — the first one did the work
   if (created.replayed) return { ok: true, ref: created.ref };
 
+  const history = await import("@/server/history");
+  await history.logBooking(created.id, "booked", history.familyActor(identity?.displayName));
+  await history.markAttemptBooked(identity?.userId, input.date, input.time, created.id);
+
   const { settlePool } = await import("@/server/queries");
   await settlePool(input.date, input.time);
 
@@ -455,6 +479,8 @@ export async function assignPoolDentist(
   const free = await freeCapableAtSlot(target.date, target.time, target.treatmentKey, target.ageGroup, target.durationMin, target.id);
   if (!free.some((f) => f.id === dentistId)) return { ok: false, error: "taken" };
   await updateAppointment(id, { dentistId });
+  const history = await import("@/server/history");
+  await history.logBooking(id, "dentist", await history.staffActor(), target);
   const { settlePool } = await import("@/server/queries");
   await settlePool(target.date, target.time);
   await revalidateAll();
@@ -548,6 +574,8 @@ export async function cancelBooking(
   if (!target) return { ok: false };
   if (target.tooLate) return { ok: false, error: "too_late" };
   await updateAppointment(target.id, { status: "cancelled" });
+  const history = await import("@/server/history");
+  await history.logBooking(target.id, "status", history.familyActor(target.identity.displayName), target);
   // a freed chair can home a pooled booking still waiting at that slot
   const { settlePool } = await import("@/server/queries");
   await settlePool(target.date, target.time);
@@ -601,6 +629,11 @@ export async function rescheduleBooking(input: {
   const { moveAppointmentGuarded } = await import("@/server/queries");
   if (!(await moveAppointmentGuarded(target.id, input.date, input.time))) {
     return { ok: false, error: "slot_taken" };
+  }
+  {
+    const history = await import("@/server/history");
+    await history.logBooking(target.id, "moved", history.familyActor(target.identity.displayName), target);
+    await history.markAttemptBooked(target.identity.userId, input.date, input.time, target.id);
   }
 
   const { settlePool } = await import("@/server/queries");
@@ -686,8 +719,20 @@ export async function staffCreateAppointment(input: {
   }
   if (typeof input.time !== "string" || !/^([01]\d|2[0-3]):(00|30)$/.test(input.time)) throw new Error("invalid time");
   const created = await createAppointment({ ...input, source: input.source, idempotencyKey: validKey(input.idempotencyKey) });
+  if (created && !created.replayed) {
+    const history = await import("@/server/history");
+    await history.logBooking(created.id, "booked", await history.staffActor());
+  }
   await revalidateAll();
   return created?.ref ?? null;
+}
+
+/** which kind of change a staff edit was, for the booking history */
+function editKind(before: AppointmentDTO, after: AppointmentDTO): "moved" | "dentist" | "status" | "edited" {
+  if (after.date !== before.date || after.time !== before.time) return "moved";
+  if (after.dentistId !== before.dentistId) return "dentist";
+  if (after.status !== before.status) return "status";
+  return "edited";
 }
 
 export async function staffUpdateAppointment(id: number, patch: AppointmentUpdate) {
@@ -695,7 +740,7 @@ export async function staffUpdateAppointment(id: number, patch: AppointmentUpdat
   const { appointmentById, staffMoveGuarded, settlePool } = await import("@/server/queries");
   const moves = patch.date !== undefined || patch.time !== undefined || patch.dentistId !== undefined;
   const touchesSlot = moves || patch.status !== undefined;
-  const before = touchesSlot ? await appointmentById(id) : null;
+  const before = await appointmentById(id);
   // bringing a cancelled booking back puts it into a slot that may have been
   // taken since — the same guarded path as a move
   const restores =
@@ -708,10 +753,16 @@ export async function staffUpdateAppointment(id: number, patch: AppointmentUpdat
   } else {
     await updateAppointment(id, patch);
   }
+  const after = await appointmentById(id);
+  if (before && after) {
+    const history = await import("@/server/history");
+    // fields changed besides the slot and status, e.g. "note, phone"
+    const other = Object.keys(patch).filter((k) => !["date", "time", "dentistId", "status", "checkedInAt"].includes(k));
+    await history.logBooking(id, editKind(before, after), await history.staffActor(), before, other.join(", "));
+  }
   // cancelling, moving or (un)assigning can home a pooled booking waiting
   // at the affected slot — run the pressure valve on both ends of a move
   if (touchesSlot) {
-    const after = await appointmentById(id);
     if (before) await settlePool(before.date, before.time);
     if (after && (!before || after.date !== before.date || after.time !== before.time)) {
       await settlePool(after.date, after.time);
@@ -740,11 +791,15 @@ export async function staffSetQueueStatus(
   status: "confirmed" | "arrived" | "in_chair" | "completed" | "no_show",
 ) {
   await guard();
+  const { appointmentById } = await import("@/server/queries");
+  const before = await appointmentById(id);
   await updateAppointment(id, {
     status,
     ...(status === "arrived" ? { checkedInAt: clinicNowHHMM() } : {}),
     ...(status === "confirmed" ? { checkedInAt: null } : {}),
   });
+  const history = await import("@/server/history");
+  await history.logBooking(id, "status", await history.staffActor(), before);
   if (status === "completed") {
     const { scheduleRecallForAppointment } = await import("@/server/clinical");
     await scheduleRecallForAppointment(id);
@@ -788,6 +843,10 @@ export async function staffDeleteAppointment(id: number) {
   const { appointmentById } = await import("@/server/queries");
   const target = await appointmentById(id);
   await deleteAppointment(id);
+  if (target) {
+    const history = await import("@/server/history");
+    await history.logBookingDeleted(target, await history.staffActor());
+  }
   if (target) {
     const { settlePool } = await import("@/server/queries");
     await settlePool(target.date, target.time);
@@ -862,7 +921,9 @@ export async function staffAddWaitlist(input: {
   note?: string;
 }) {
   await guard();
-  await addWaitlist(input);
+  const id = await addWaitlist(input);
+  const history = await import("@/server/history");
+  await history.logWalkin(id, "walkin", await history.staffActor());
   await revalidateAll();
 }
 
@@ -882,26 +943,38 @@ export async function staffSaveVisitRecord(input: VisitRecordInput) {
  */
 export async function staffFinishVisit(input: VisitRecordInput) {
   await guard();
-  const { upsertVisitRecord, updateWaitlistStatus } = await import("@/server/queries");
+  const { upsertVisitRecord, updateWaitlistStatus, appointmentById, waitlistStatus } = await import("@/server/queries");
   await upsertVisitRecord(input);
   const clinical = await import("@/server/clinical");
+  const history = await import("@/server/history");
   if (input.appointmentId != null) {
+    const before = await appointmentById(input.appointmentId);
     await updateAppointment(input.appointmentId, { status: "completed" });
+    await history.logBooking(input.appointmentId, "status", await history.staffActor(), before);
     await clinical.scheduleRecallForAppointment(input.appointmentId);
   } else if (input.waitlistId != null) {
+    const prev = await waitlistStatus(input.waitlistId);
     await updateWaitlistStatus(input.waitlistId, "done");
+    await history.logWalkin(input.waitlistId, "status", await history.staffActor(), prev);
   }
   await revalidateAll();
 }
 
 export async function staffSetWaitlistStatus(id: number, status: WaitlistDTO["status"], dentistId?: number | null) {
   await guard();
+  const { waitlistStatus } = await import("@/server/queries");
+  const prev = await waitlistStatus(id);
   await updateWaitlistStatus(id, status, dentistId);
+  const history = await import("@/server/history");
+  await history.logWalkin(id, "status", await history.staffActor(), prev);
   await revalidateAll();
 }
 
 export async function staffRemoveWaitlist(id: number) {
   await guard();
+  const history = await import("@/server/history");
+  // written first: the event reads the row, which is about to go
+  await history.logWalkin(id, "deleted", await history.staffActor());
   await removeWaitlist(id);
   await revalidateAll();
 }

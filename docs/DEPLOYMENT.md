@@ -84,8 +84,9 @@ Everything runs on one server with Docker: Postgres, the app, and Caddy
 2. Point your domain's DNS **A record** at that IP (e.g. `booking.yourclinic.com`).
 3. On this Mac: `pnpm deploy:vps root@<ip>` — the first run creates
    `deploy/.env.production`; fill it in (domain, a database password, STAFF_PIN,
-   CRON_SECRET, LINE keys, and `COPY_FROM_DATABASE_URL` = the Neon URL to bring
-   the current data across once). Run the same command again.
+   CRON_SECRET, LINE keys). Leave `COPY_FROM_DATABASE_URL` empty: the Neon
+   database only has test data, so the server starts fresh. Run the same
+   command again.
 4. It installs Docker, a swap file and a firewall, copies the old database,
    builds and starts everything, applies schema changes, and sets the daily
    LINE reminders (18:00 / 07:00) and a nightly database backup
@@ -101,6 +102,16 @@ Everything runs on one server with Docker: Postgres, the app, and Caddy
 5. Point LINE at the new address: LIFF endpoint `https://<domain>/` and webhook
    `https://<domain>/api/line/webhook`. Rebuild the staff app with
    `VITE_API_URL=https://<domain>`.
+6. Add the clinic's real dentists, treatments, hours and holidays, and try
+   everything (bookings, LINE messages, reminders). Then, **once, right before
+   the clinic tells families**, clear what the trying-out left behind:
+   ```bash
+   ssh root@<ip>
+   cd /opt/dentakids && bash deploy/clear-test-data.sh
+   ```
+   It shows what's there, asks you to type `CLEAR`, saves a backup first, and
+   keeps the setup (dentists, treatments, hours, holidays, settings, staff
+   accounts); see `deploy/clear-test-data.sql` for the exact list.
 
 Updating later is the same command — it sends the code on this Mac, rebuilds,
 and applies schema changes.

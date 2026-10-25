@@ -50,6 +50,8 @@ export const dentist = pgTable(
     face: jsonb("face").notNull().default({}),
     photoSmall: text("photo_small").notNull().default(""),
     photoLarge: text("photo_large").notNull().default(""),
+    /** เลขที่ใบอนุญาตประกอบวิชาชีพทันตกรรม (ท.xxxx) — printed on certificates and prescriptions */
+    licenseNo: text("license_no").notNull().default(""),
     /** hidden dentists drop out of the site and the booking roster */
     isActive: boolean("is_active").notNull().default(true),
     /** smaller sorts earlier in lists */
@@ -183,6 +185,24 @@ export const guardian = pgTable(
     /** how the guardian relates to the child — "แม่", "พ่อ", "ตนเอง" (self) */
     relation: text("relation").notNull().default(""),
     address: text("address").notNull().default(""),
+    /** a second number (the other parent, work) */
+    phone2: text("phone2").notNull().default(""),
+    email: text("email").notNull().default(""),
+    /** เลขบัตรประชาชน of the adult who signs consent for a child */
+    idCard: text("id_card").notNull().default(""),
+    /** receipt in someone else's name (a company, for insurance claims): name, tax id, address */
+    billingName: text("billing_name").notNull().default(""),
+    billingTaxId: text("billing_tax_id").notNull().default(""),
+    billingAddress: text("billing_address").notNull().default(""),
+    /** how the family found the clinic: "line", "facebook", "google", "friend", "walk_past", "other: …" */
+    referralSource: text("referral_source").notNull().default(""),
+    /** PDPA: when the family agreed to the privacy notice, and which version */
+    consentAt: timestamp("consent_at", { withTimezone: true }),
+    consentVersion: text("consent_version").notNull().default(""),
+    /** may the clinic send news and promotions (not reminders) */
+    marketingOk: boolean("marketing_ok").notNull().default(false),
+    /** may the clinic use photos of the child for teaching or its own posts */
+    photoOk: boolean("photo_ok").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -226,6 +246,38 @@ export const child = pgTable(
     recallMonths: integer("recall_months").notNull().default(6),
     /** who pays: "cash" | "sso" (ประกันสังคม) | "nhso" (บัตรทอง) | "gov" | "insurance" */
     coverage: text("coverage").notNull().default("cash"),
+    /** insurer and policy / member number when coverage isn't cash */
+    insurer: text("insurer").notNull().default(""),
+    insuranceNo: text("insurance_no").notNull().default(""),
+    /** คำนำหน้า as printed on documents: "ด.ช.", "ด.ญ.", "นาย", "นาง", "นางสาว" */
+    prefix: text("prefix").notNull().default(""),
+    /** name in English (certificates for school abroad, foreign patients) */
+    nameEn: text("name_en").notNull().default(""),
+    nationality: text("nationality").notNull().default(""),
+    /** foreign patients without a Thai ID card */
+    passportNo: text("passport_no").notNull().default(""),
+    /** the patient's own number (adults, teenagers) — the guardian's is on guardian */
+    phone: text("phone").notNull().default(""),
+    school: text("school").notNull().default(""),
+    /** who to call if the guardian can't be reached */
+    emergencyName: text("emergency_name").notNull().default(""),
+    emergencyPhone: text("emergency_phone").notNull().default(""),
+    emergencyRelation: text("emergency_relation").notNull().default(""),
+    /**
+     * The medical-history form as answered: { heart, bleeding, diabetes, asthma,
+     * epilepsy, hepatitis, hiv, pregnant, smoker, antibioticCover, … } → true /
+     * false / text. The free-text conditions/medications/allergies above stay
+     * the quick view; this is the full questionnaire.
+     */
+    medicalHistory: jsonb("medical_history").notNull().default({}),
+    /** when the history was last checked with the family (it should be, every visit) */
+    medicalReviewedAt: timestamp("medical_reviewed_at", { withTimezone: true }),
+    /** the dentist the family prefers to see */
+    preferredDentistId: integer("preferred_dentist_id").references(() => dentist.id, { onDelete: "set null" }),
+    /** hidden from lists instead of deleted (records must be kept); null = active */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /** a duplicate folded into another record — its bookings and history moved there */
+    mergedIntoId: integer("merged_into_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -508,6 +560,81 @@ export const waitlistEntry = pgTable("waitlist_entry", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/* ────────────────────────────── history (for reports and forecasts) ────── */
+
+/**
+ * Every change to a booking or a walk-in, oldest first, never edited. The
+ * booking row only says how things stand now; this says how they got there —
+ * when it was cancelled and by whom, each move and where from, when the
+ * family checked in, sat down and left (real treatment length, waiting
+ * time). Written by src/server/history.ts after each change.
+ *
+ * `status`/`date`/`time`/`dentistId` are the booking as it stood after the
+ * change; the `prev…` columns as it stood before (moves, status changes).
+ * The rows outlive a deleted booking or walk-in.
+ */
+export const visitEvent = pgTable(
+  "visit_event",
+  {
+    id: serial("id").primaryKey(),
+    /** plain ids, not foreign keys: the history outlives a deleted booking or walk-in */
+    appointmentId: integer("appointment_id"),
+    waitlistId: integer("waitlist_id"),
+    /** the booking's ref (empty for walk-ins) */
+    ref: text("ref").notNull().default(""),
+    /** "booked" | "moved" | "dentist" | "status" | "edited" | "deleted" | "walkin" */
+    kind: text("kind").notNull(),
+    /** who did it: "family" (website), "staff" (app), "system" (automatic, e.g. pool assignment) */
+    actor: text("actor").notNull(),
+    /** the staff member signed in (full edition) or the family's LINE name */
+    actorName: text("actor_name").notNull().default(""),
+    status: text("status").notNull().default(""),
+    date: text("date").notNull().default(""),
+    time: text("time").notNull().default(""),
+    dentistId: integer("dentist_id"),
+    prevStatus: text("prev_status").notNull().default(""),
+    prevDate: text("prev_date").notNull().default(""),
+    prevTime: text("prev_time").notNull().default(""),
+    prevDentistId: integer("prev_dentist_id"),
+    /** what else changed ("note, phone"), or a reason */
+    detail: text("detail").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("visit_event_appt_idx").on(t.appointmentId),
+    index("visit_event_waitlist_idx").on(t.waitlistId),
+    index("visit_event_at_idx").on(t.createdAt),
+  ],
+);
+
+/**
+ * Demand, including what never became a booking: each time a family picks a
+ * time on the website. `outcome` is "held" (the time was free), "booked"
+ * (the hold turned into a booking) or why it couldn't be held ("slot_taken",
+ * "closed", …). Held-but-never-booked rows are families who gave up; refused
+ * rows are times the clinic was too full for.
+ */
+export const bookingAttempt = pgTable(
+  "booking_attempt",
+  {
+    id: serial("id").primaryKey(),
+    date: text("date").notNull(),
+    time: text("time").notNull(),
+    /** null = "any dentist" */
+    dentistId: integer("dentist_id").references(() => dentist.id, { onDelete: "set null" }),
+    treatmentKey: text("treatment_key").notNull(),
+    ageGroup: text("age_group"),
+    /** the LINE account (empty when not signed in) */
+    lineUserId: text("line_user_id").notNull().default(""),
+    /** "new" booking or "move" of an existing one */
+    purpose: text("purpose").notNull().default("new"),
+    outcome: text("outcome").notNull(),
+    appointmentId: integer("appointment_id").references(() => appointment.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("booking_attempt_at_idx").on(t.createdAt), index("booking_attempt_line_idx").on(t.lineUserId)],
+);
+
 /**
  * What the dentist did during a visit — written on the room page (full
  * edition). One row per visit; the visit is an appointment row OR a walk-in
@@ -537,6 +664,23 @@ export const visitRecord = pgTable(
      * `price` above stay in step (keys, sum) for older readers.
      */
     items: jsonb("items").notNull().default([]),
+    /* the visit as a clinical note (S-O-A-P) — the full edition's room page fills these */
+    /** why they came, in the family's words */
+    chiefComplaint: text("chief_complaint").notNull().default(""),
+    /** what the dentist saw on examination */
+    findings: text("findings").notNull().default(""),
+    /** [{ code: ICD-10 e.g. "K02.1", text, teeth }] — fund claims (SSO/NHSO) need the codes */
+    diagnoses: jsonb("diagnoses").notNull().default([]),
+    /** local anaesthetic used: drug, cartridges, lot — e.g. "Mepivacaine 3% 1 cart. lot A123" */
+    anesthesia: text("anesthesia").notNull().default(""),
+    /** { bp, pulse, temp, weightKg } — adults and sedation */
+    vitals: jsonb("vitals").notNull().default({}),
+    /** how the child coped, Frankl scale 1 (definitely negative) – 4 (definitely positive) */
+    behavior: smallint("behavior"),
+    /** what to do next time */
+    nextPlan: text("next_plan").notNull().default(""),
+    /** the assistant in the room */
+    assistantName: text("assistant_name").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -721,6 +865,28 @@ export const toothEvent = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("tooth_event_child_idx").on(t.childId)],
+);
+
+/**
+ * A gum (periodontal) exam — mostly adults and teenagers. `data` is per
+ * tooth: { "16": { pd: [3,2,3,3,2,4], bop: [..6 booleans], rec: [..6],
+ * mobility: 0–3, furcation: 0–3 } } — six sites a tooth, buccal then lingual.
+ */
+export const perioExam = pgTable(
+  "perio_exam",
+  {
+    id: serial("id").primaryKey(),
+    childId: integer("child_id")
+      .notNull()
+      .references(() => child.id, { onDelete: "cascade" }),
+    /** YYYY-MM-DD */
+    date: text("date").notNull(),
+    dentistId: integer("dentist_id").references(() => dentist.id, { onDelete: "set null" }),
+    data: jsonb("data").notNull().default({}),
+    note: text("note").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("perio_exam_child_idx").on(t.childId)],
 );
 
 /**

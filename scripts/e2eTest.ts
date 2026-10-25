@@ -15,7 +15,7 @@ async function main() {
 
   const actions = await import("../src/server/actions");
   const queries = await import("../src/server/queries");
-  const { todayISO, addDays, weekdayIndex, minutesOf } = await import("../src/lib/dates");
+  const { todayISO, addDays, minutesOf } = await import("../src/lib/dates");
 
   const today = todayISO();
   let passed = 0, failed = 0;
@@ -46,14 +46,8 @@ async function main() {
   await actions.staffUpdateBookingRules({ windowDays: 14, leadHours: 1, cancelHours: 0 });
 
   console.log("\n— 1. Parent books online (new family) —");
-  // find a day naree works, next week
-  let date = addDays(today, 7);
-  while (![2, 3, 5, 6].includes(weekdayIndex(date))) date = addDays(date, 1);
-
-  // pick a slot no leftover run has taken, per dentist availability
-  const allSlots = await (await import("../src/server/queries")).slotsForDate(date);
-  const freeTimes = [...new Set(allSlots.filter((s) => !s.taken).map((s) => s.time))].sort();
-  const time = freeTimes.find((t) => t >= "14:00") ?? freeTimes[0];
+  // a day next week when a dentist who does fluoride is free
+  const { day: date, time } = await bookable(addDays(today, 7), "fluoride", null);
   console.log(`  (using ${date} at ${time})`);
   const result = await actions.bookAppointment({ ageGroup: "kid",
     date, time, treatmentKey: "fluoride",
@@ -233,9 +227,13 @@ async function main() {
 
   console.log("\n— 9. Booking window (how far ahead families may book) —");
   const savedWindow = await queries.getBookingWindowDays();
+  // ~10 months ahead, a day when a dentist who does fluoride works
+  const fluorideDocs = await queries.capableDentistIds("fluoride", "kid");
+  const fluorideFree = async (d: string) =>
+    [...new Set((await queries.slotsForDate(d)).filter((s) => !s.taken && fluorideDocs.includes(s.dentistId)).map((s) => s.time))].sort();
   let far = addDays(today, 300);
-  while (![2, 3, 5, 6].includes(weekdayIndex(far))) far = addDays(far, 1);
-  const farTime = [...new Set((await queries.slotsForDate(far)).filter((s) => !s.taken).map((s) => s.time))].sort()[0];
+  while ((await fluorideFree(far)).length === 0) far = addDays(far, 1);
+  const farTime = (await fluorideFree(far))[0];
   await actions.staffUpdateBookingRules({ windowDays: 14 });
   const tooFar = await actions.bookAppointment({ ageGroup: "kid",
     date: far, time: farTime, treatmentKey: "fluoride", dentistId: null,
@@ -348,7 +346,7 @@ async function main() {
   const atSlot = (await queries.listAppointmentsBetween(rDay, rDay)).filter((a) => a.time === rTime && a.dentistSlug === "naree" && a.status !== "cancelled");
   ok("…the dentist still has one booking at that time", atSlot.length === 1);
   for (const a of await queries.listAppointmentsBetween(rDay, rDay)) {
-    if (a.childName.startsWith("คืนนัด")) await queries.deleteAppointment(a.id);
+    if (a.childName.startsWith("คืนนัด")) await actions.staffDeleteAppointment(a.id);
   }
 
   console.log("\n— 13. One hold at a time per family —");
@@ -362,6 +360,58 @@ async function main() {
   const other = await actions.holdSlot({ date: hDay, time: hTimes[0], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-other" });
   ok("…so another family can hold it", other.ok);
   for (const t of [h2.token, other.token]) if (t) await actions.releaseSlotHold(t);
+
+  console.log("\n— 14. History is kept for every change —");
+  {
+    const { visitEvent, bookingAttempt } = await import("../src/db/schema");
+    const { asc, and, eq: heq } = await import("drizzle-orm");
+    const eventsFor = (where: ReturnType<typeof heq>) => ndb.select().from(visitEvent).where(where).orderBy(asc(visitEvent.id));
+
+    // section 1's booking: booked online → dentist assigned by staff → cancelled by the family
+    const ev = await eventsFor(heq(visitEvent.appointmentId, onStaff!.id));
+    const kinds = ev.map((e) => `${e.kind}:${e.actor}`);
+    ok("online booking → history says booked by the family", kinds[0] === "booked:family", kinds.join(" "));
+    const assign = ev.find((e) => e.kind === "dentist");
+    ok("…dentist assigned by staff, from none", assign?.actor === "staff" && assign.prevDentistId === null && assign.dentistId === dentistId);
+    const cancel = ev.find((e) => e.kind === "status" && e.status === "cancelled");
+    ok("…cancelled by the family, from confirmed", cancel?.actor === "family" && cancel.prevStatus === "confirmed");
+
+    // the walk-in from section 6: arrived → in chair → done → removed
+    const wk = (await eventsFor(heq(visitEvent.waitlistId, entry!.id))).map((e) => `${e.kind}:${e.prevStatus}>${e.status}`).join(" ");
+    ok(
+      "walk-in: arrived, in the chair, done, removed — each step with the one before",
+      wk === "walkin:>waiting status:waiting>in_chair status:in_chair>done deleted:done>",
+      wk,
+    );
+
+    // section 12's deleted bookings keep a line with their ref
+    const gone = await ndb.select().from(visitEvent).where(and(heq(visitEvent.ref, first ?? ""), heq(visitEvent.kind, "deleted")));
+    ok("a deleted booking leaves a history line with its ref", gone.length === 1 && gone[0].prevStatus === "cancelled");
+
+    // demand: a pick that became a booking, then the family moves it
+    const { day: mDay, time: mTime } = await bookable(addDays(today, 2), "checkup", naree.id, "naree");
+    const mHold = await actions.holdSlot({ date: mDay, time: mTime, treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-history" });
+    const mBook = await actions.bookAppointment({
+      date: mDay, time: mTime, treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid",
+      childName: "ประวัติ", phone: "0966666666", lineIdToken: "e2e-history", holdToken: mHold.token,
+    });
+    ok("history test booking made", mBook.ok, JSON.stringify(mBook));
+    const mId = (await queries.listAppointmentsBetween(mDay, mDay)).find((a) => a.ref === mBook.ref)!.id;
+    const att = await ndb.select().from(bookingAttempt).where(heq(bookingAttempt.appointmentId, mId));
+    ok("the website pick is logged and marked booked", att.length === 1 && att[0].outcome === "booked" && att[0].purpose === "new");
+    const nextTime = (await queries.slotsForDate(mDay)).filter((x) => !x.taken && x.dentistSlug === "naree" && x.time > mTime).map((x) => x.time).sort()[0];
+    if (nextTime) {
+      const moved = await actions.rescheduleBooking({ ref: mBook.ref!, lineIdToken: "e2e-history", date: mDay, time: nextTime });
+      const mv = (await eventsFor(heq(visitEvent.appointmentId, mId))).find((e) => e.kind === "moved");
+      ok("a move keeps where it was moved from", moved.ok && mv?.prevTime === mTime && mv.time === nextTime && mv.actor === "family");
+    }
+    await actions.staffSetQueueStatus(mId, "arrived");
+    const arrived = (await eventsFor(heq(visitEvent.appointmentId, mId))).at(-1);
+    ok("check-in at the desk is a timed history line", arrived?.kind === "status" && arrived.status === "arrived" && arrived.actor === "staff");
+    const refused = await ndb.select().from(bookingAttempt).where(and(heq(bookingAttempt.date, far), heq(bookingAttempt.lineUserId, "")));
+    ok("a time that couldn't be held is logged with the reason", refused.some((r) => r.outcome !== "held"));
+    await queries.deleteAppointment(mId);
+  }
 
   await actions.staffUpdateBookingRules(rulesBefore);
 

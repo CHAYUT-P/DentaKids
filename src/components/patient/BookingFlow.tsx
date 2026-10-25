@@ -598,7 +598,15 @@ export function BookingFlow(props: BookingFlowProps) {
     if (!treatment || !date) return;
     const dentistId = dentist ? (dentists.find((d) => d.slug === dentist)?.id ?? null) : null;
     const mine = holdSeq.current;
-    holdSlot({ date, time: hhmm, treatmentKey: treatment, dentistId, ageGroup: group, lineIdToken: line.token ?? undefined })
+    holdSlot({
+      date,
+      time: hhmm,
+      treatmentKey: treatment,
+      dentistId,
+      ageGroup: group,
+      lineIdToken: line.token ?? undefined,
+      purpose: resched ? "move" : "new",
+    })
       .then((r) => {
         if (mine !== holdSeq.current) {
           // the family has tapped something else since — let this slot go
