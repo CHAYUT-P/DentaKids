@@ -289,6 +289,17 @@ async function seedClinicInfo() {
 }
 
 async function main() {
+  // `--dentists-only`: bring the dentist roster in line with src/data/dentists.ts
+  // and touch nothing else, so it's safe on the test site's database, where the
+  // full seed would wipe its bookings. Old dentists are retired, not deleted.
+  if (process.argv.includes("--dentists-only")) {
+    console.log("Updating dentists only…");
+    await seedDentists();
+    const rows = await db.select({ slug: dentist.slug, isActive: dentist.isActive }).from(dentist);
+    console.log(`Done. active: ${rows.filter((r) => r.isActive).map((r) => r.slug).join(", ")}`);
+    return;
+  }
+
   console.log("Seeding Denta Kids database…");
 
   await seedDentists();

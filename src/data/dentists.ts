@@ -161,7 +161,7 @@ export const dentists: Dentist[] = [
     text: {
       th: {
         name: "ทพ. ขานนท์ คำศิลป์",
-        title: "ทันตแพทย์ทั่วไป (เด็กและผู้ใหญ่)",
+        title: "ทันตแพทย์ผู้ใหญ่และเด็ก",
         blurb: "",
         bio: "",
         credentials: ["ทันตแพทยศาสตรบัณฑิต มหาวิทยาลัยเวสเทิร์น"],
@@ -170,7 +170,7 @@ export const dentists: Dentist[] = [
       },
       en: {
         name: "Dr. Khanon Kamsin",
-        title: "General dentist (children & adults)",
+        title: "Dentist for adults & children",
         blurb: "",
         bio: "",
         credentials: ["DDS, Western University"],
@@ -219,7 +219,7 @@ export const dentists: Dentist[] = [
     text: {
       th: {
         name: "ทพ. ภาคภูมิ ฉายศรีศิริ",
-        title: "ศัลยกรรมช่องปาก",
+        title: "ทันตแพทย์ศัลยกรรมช่องปาก",
         blurb: "",
         bio: "",
         credentials: ["ทันตแพทยศาสตรบัณฑิต มหาวิทยาลัยธรรมศาสตร์"],
@@ -228,7 +228,7 @@ export const dentists: Dentist[] = [
       },
       en: {
         name: "Dr. Phakphum Chaisrisiri",
-        title: "Oral surgery",
+        title: "Oral surgeon",
         blurb: "",
         bio: "",
         credentials: ["DDS, Thammasat University"],

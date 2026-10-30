@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
+    "db:seed:dentists": "tsx scripts/seed.ts --dentists-only",
     "db:test": "tsx --import ./scripts/shimServerOnly.ts scripts/dbTest.ts",
     "db:studio": "drizzle-kit studio",
     "e2e:test": "tsx --import ./scripts/shimServerOnly.ts scripts/e2eTest.ts",

@@ -226,7 +226,8 @@ async function main() {
   check("clinic day update lands in DB", sun?.isOpen === true);
   const { dentistShift } = await import("../src/db/schema");
   const { and: andOp, eq: eqOp } = await import("drizzle-orm");
-  const [anyDentist] = await db.select({ id: dentist.id }).from(dentist).limit(1);
+  // an active one: a retired dentist never has bookable slots
+  const [anyDentist] = await db.select({ id: dentist.id }).from(dentist).where(eqOp(dentist.isActive, true)).limit(1);
   const [shiftBefore] = await db
     .select()
     .from(dentistShift)
