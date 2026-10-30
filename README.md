@@ -44,6 +44,7 @@ pnpm deploy:vps root@<ip>     # deploy / update the VPS (see docs/DEPLOYMENT.md)
 ```
 
 **New here? Start with [docs/OVERVIEW.md](docs/OVERVIEW.md)**: what the system is,
-where the code lives, and why it's built this way. Design notes with measured
+where the code lives, and why it's built this way. For a short version to
+give an AI assistant, use [docs/AI_BRIEF.md](docs/AI_BRIEF.md). Design notes with measured
 results are in [docs/design/](docs/design/). More: [docs/PROJECT.md](docs/PROJECT.md)
 (original plan) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (hosting).

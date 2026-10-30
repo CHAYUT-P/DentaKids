@@ -44,6 +44,7 @@ export function toUIDentist(d: DentistDTO): Dentist & { id: number } {
     id: d.id,
     slug: d.slug,
     years: d.years,
+    licenseNo: d.licenseNo,
     tint: asTint(d.tint),
     face: asFace(d.face),
     photo: { small: d.photoSmall, large: d.photoLarge },

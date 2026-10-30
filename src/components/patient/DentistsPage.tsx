@@ -30,10 +30,12 @@ export function DentistsPage({ dentists }: { dentists: Dentist[] }) {
                 <div className="docTitle">{x.title}</div>
                 <div className="docBlurb">{x.blurb}</div>
                 <div className="docMeta">
-                  <span className="yrs">
-                    <Star size={11} />
-                    {d.years} {t.common.years}
-                  </span>
+                  {d.years > 0 ? (
+                    <span className="yrs">
+                      <Star size={11} />
+                      {d.years} {t.common.years}
+                    </span>
+                  ) : null}
                   <span className="days">{x.days}</span>
                 </div>
               </div>

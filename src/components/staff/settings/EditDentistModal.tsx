@@ -96,7 +96,8 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [slug, setSlug] = useState("");
-  const [years, setYears] = useState(dentist?.years ?? 1);
+  const [years, setYears] = useState(dentist?.years ?? 0);
+  const [licenseNo, setLicenseNo] = useState(dentist?.licenseNo ?? "");
   const [tint, setTint] = useState<string>(dentist?.tint ?? "lav");
   const [thName, setThName] = useState(dentist?.text.th.name ?? "");
   const [enName, setEnName] = useState(dentist?.text.en.name ?? "");
@@ -227,6 +228,7 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
       createDentist({
         slug: slug.trim().toLowerCase(),
         years,
+        licenseNo: licenseNo.trim(),
         tint,
         treats,
         treatAges,
@@ -261,6 +263,7 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
     updateDentist(dentist.slug, {
       isActive,
       years,
+      licenseNo: licenseNo.trim(),
       tint: tint as EditableDentist["tint"],
       shifts,
       treats,
@@ -465,7 +468,18 @@ export function EditDentistModal({ dentist, onClose }: EditDentistModalProps) {
                         min={0}
                         max={60}
                         value={years}
+                        placeholder="เว้นว่างไว้ได้ถ้ายังไม่ระบุ"
                         onChange={(e) => setYears(Number(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>เลขที่ใบอนุญาตประกอบวิชาชีพ</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={licenseNo}
+                        placeholder="เช่น ท.5021"
+                        onChange={(e) => setLicenseNo(e.target.value)}
                       />
                     </div>
                     {isNew ? (

@@ -68,7 +68,7 @@ export default function StaffDentistsPage() {
                 <span className="doc-text">
                   <span className="doc-name">{d.text.th.name}</span>
                   <span className="doc-sub">
-                    {d.text.th.title} · ประสบการณ์ {d.years} ปี
+                    {d.years > 0 ? `${d.text.th.title} · ประสบการณ์ ${d.years} ปี` : d.text.th.title}
                   </span>
                   {treats ? (
                     <span className="doc-treats" title={treats}>

@@ -169,10 +169,12 @@ export function DentistStrip({ list }: { list: Dentist[] }) {
             <DentistAvatar d={d} alt={x.name} size={58} />
             <span className="dmName">{x.name}</span>
             <span className="dmTitle">{x.title}</span>
-            <span className="dmYrs">
-              <Star size={9} />
-              {d.years} {t.common.years}
-            </span>
+            {d.years > 0 ? (
+              <span className="dmYrs">
+                <Star size={9} />
+                {d.years} {t.common.years}
+              </span>
+            ) : null}
           </Link>
         );
       })}

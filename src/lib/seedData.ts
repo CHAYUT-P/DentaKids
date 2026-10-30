@@ -13,11 +13,12 @@ import type { IconKey } from "@/data/icons";
 
 /** weekly working days (0 = Sun … 6 = Sat), matching the shifts the seed writes */
 const WORK_DAYS: Record<string, number[]> = {
-  naree: [1, 3, 5, 6], // จันทร์ พุธ ศุกร์ เสาร์
-  piya: [2, 4, 6], // อังคาร พฤหัสบดี เสาร์
-  manee: [1, 2, 4, 5], // จันทร์ อังคาร พฤหัสบดี ศุกร์
-  thanakrit: [3, 5, 6], // พุธ ศุกร์ เสาร์
-  siriporn: [1, 3, 4], // จันทร์ พุธ พฤหัสบดี
+  onanong: [1, 3, 5, 6], // จันทร์ พุธ ศุกร์ เสาร์
+  piyada: [2, 4, 6], // อังคาร พฤหัสบดี เสาร์
+  khanon: [1, 2, 4, 5], // จันทร์ อังคาร พฤหัสบดี ศุกร์
+  phannathip: [1, 3, 4], // จันทร์ พุธ พฤหัสบดี
+  phakphum: [3, 5, 6], // พุธ ศุกร์ เสาร์
+  chawalit: [2, 4, 6], // อังคาร พฤหัสบดี เสาร์
 };
 
 /** the first day on/after `fromISO` that this dentist actually works */
@@ -111,14 +112,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     // next working day on/after today, so availability checking agrees ────
     {
       ref: "DK-4821",
-      date: nextWorkingDay("naree", tDate),
+      date: nextWorkingDay("onanong", tDate),
       time: "09:30",
       durationMin: 30,
       childName: "น้องเจได",
       childAge: 5,
       guardianName: "คุณแม่มณฑิรา",
       phone: "081-234-5678",
-      dentistSlug: "naree",
+      dentistSlug: "onanong",
       treatmentKey: "checkup",
       source: "online",
       status: "confirmed",
@@ -127,14 +128,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     },
     {
       ref: "DK-4825",
-      date: nextWorkingDay("naree", tDate),
+      date: nextWorkingDay("onanong", tDate),
       time: "10:30",
       durationMin: 30,
       childName: "น้องพรีม",
       childAge: 8,
       guardianName: "คุณพ่อนพดล",
       phone: "089-876-5432",
-      dentistSlug: "naree",
+      dentistSlug: "onanong",
       treatmentKey: "sealant",
       source: "phone",
       status: "confirmed",
@@ -143,14 +144,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     },
     {
       ref: "DK-4830",
-      date: nextWorkingDay("piya", tDate),
+      date: nextWorkingDay("chawalit", tDate),
       time: "11:00",
       durationMin: 30,
       childName: "น้องมินนี่",
       childAge: 12,
       guardianName: "คุณแม่กมลวรรณ",
       phone: "084-555-1234",
-      dentistSlug: "piya",
+      dentistSlug: "chawalit",
       treatmentKey: "aligner",
       source: "online",
       status: "confirmed",
@@ -159,14 +160,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     },
     {
       ref: "DK-4832",
-      date: nextWorkingDay("manee", tDate),
+      date: nextWorkingDay("khanon", tDate),
       time: "13:30",
       durationMin: 30,
       childName: "น้องต้นกล้า",
       childAge: 6,
       guardianName: "คุณแม่วิไล",
       phone: "082-999-1122",
-      dentistSlug: "manee",
+      dentistSlug: "khanon",
       treatmentKey: "scaling",
       source: "online",
       status: "confirmed",
@@ -175,14 +176,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     },
     {
       ref: "DK-4838",
-      date: nextWorkingDay("siriporn", tDate),
+      date: nextWorkingDay("phannathip", tDate),
       time: "15:00",
       durationMin: 30,
       childName: "น้องออโต้",
       childAge: 7,
       guardianName: "คุณพ่อกิตติ",
       phone: "086-333-4455",
-      dentistSlug: "siriporn",
+      dentistSlug: "phannathip",
       treatmentKey: "filling",
       source: "phone",
       status: "confirmed",
@@ -193,14 +194,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     // ── tomorrow ─────────────────────────────────────────────────────────
     {
       ref: "DK-4850",
-      date: nextWorkingDay("naree", addDays(tDate, 1)),
+      date: nextWorkingDay("onanong", addDays(tDate, 1)),
       time: "10:00",
       durationMin: 30,
       childName: "น้องยูจิ",
       childAge: 4,
       guardianName: "คุณแม่พิมพ์",
       phone: "087-111-2233",
-      dentistSlug: "naree",
+      dentistSlug: "onanong",
       treatmentKey: "fluoride",
       source: "online",
       status: "confirmed",
@@ -209,14 +210,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     },
     {
       ref: "DK-4852",
-      date: nextWorkingDay("piya", addDays(tDate, 1)),
+      date: nextWorkingDay("chawalit", addDays(tDate, 1)),
       time: "14:00",
       durationMin: 30,
       childName: "น้องไอริณ",
       childAge: 9,
       guardianName: "คุณพ่อชาญ",
       phone: "085-444-5566",
-      dentistSlug: "piya",
+      dentistSlug: "chawalit",
       treatmentKey: "braces",
       source: "phone",
       status: "confirmed",
@@ -227,14 +228,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     // ── in 3 days ────────────────────────────────────────────────────────
     {
       ref: "DK-4870",
-      date: nextWorkingDay("thanakrit", addDays(tDate, 3)),
+      date: nextWorkingDay("phakphum", addDays(tDate, 3)),
       time: "11:30",
       durationMin: 30,
       childName: "น้องคอปเตอร์",
       childAge: 10,
       guardianName: "คุณแม่ศศิ",
       phone: "083-666-7788",
-      dentistSlug: "thanakrit",
+      dentistSlug: "phakphum",
       treatmentKey: "extraction",
       source: "online",
       status: "confirmed",
@@ -245,14 +246,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     // ── past (history) ───────────────────────────────────────────────────
     {
       ref: "DK-4477",
-      date: (() => { for (let i = 2; i < 9; i++) { const iso = addDays(tDate, -i); if (WORK_DAYS.naree.includes(weekdayIndex(iso))) return iso; } return addDays(tDate, -2); })(),
+      date: (() => { for (let i = 2; i < 9; i++) { const iso = addDays(tDate, -i); if (WORK_DAYS.onanong.includes(weekdayIndex(iso))) return iso; } return addDays(tDate, -2); })(),
       time: "16:00",
       durationMin: 30,
       childName: "น้องเจได",
       childAge: 5,
       guardianName: "คุณแม่มณฑิรา",
       phone: "081-234-5678",
-      dentistSlug: "naree",
+      dentistSlug: "onanong",
       treatmentKey: "fluoride",
       source: "online",
       status: "completed",
@@ -261,14 +262,14 @@ export function buildDefaultAppointments(tDate: string): DemoAppointment[] {
     },
     {
       ref: "DK-4310",
-      date: (() => { for (let i = 5; i < 12; i++) { const iso = addDays(tDate, -i); if (WORK_DAYS.siriporn.includes(weekdayIndex(iso))) return iso; } return addDays(tDate, -5); })(),
+      date: (() => { for (let i = 5; i < 12; i++) { const iso = addDays(tDate, -i); if (WORK_DAYS.phannathip.includes(weekdayIndex(iso))) return iso; } return addDays(tDate, -5); })(),
       time: "11:00",
       durationMin: 30,
       childName: "น้องพรีม",
       childAge: 8,
       guardianName: "คุณพ่อนพดล",
       phone: "089-876-5432",
-      dentistSlug: "siriporn",
+      dentistSlug: "phannathip",
       treatmentKey: "filling",
       source: "phone",
       status: "completed",

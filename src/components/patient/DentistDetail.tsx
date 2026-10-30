@@ -24,32 +24,43 @@ export function DentistDetail({ d }: { d: Dentist }) {
         <div className="docHeroText">
           <div className="docName big">{x.name}</div>
           <div className="docTitle">{x.title}</div>
-          <span className="yrs solid">
-            <Star size={11} />
-            {d.years} {t.common.years} {t.common.exp}
-          </span>
+          {d.years > 0 ? (
+            <span className="yrs solid">
+              <Star size={11} />
+              {d.years} {t.common.years} {t.common.exp}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <Eyebrow>{t.dentistsPage.bio}</Eyebrow>
-      <Panel>
-        <p className="prose">{x.bio}</p>
-      </Panel>
+      {x.bio ? (
+        <>
+          <Eyebrow>{t.dentistsPage.bio}</Eyebrow>
+          <Panel>
+            <p className="prose">{x.bio}</p>
+          </Panel>
+        </>
+      ) : null}
 
-      <Eyebrow>{t.dentistsPage.credentials}</Eyebrow>
-      <ul className="creds">
-        {x.credentials.map((c) => (
-          <li key={c}>
-            <span className="cTick">
-              <Check size={11} />
-            </span>
-            {c}
-          </li>
-        ))}
-      </ul>
+      {x.credentials.length > 0 ? (
+        <>
+          <Eyebrow>{t.dentistsPage.credentials}</Eyebrow>
+          <ul className="creds">
+            {x.credentials.map((c) => (
+              <li key={c}>
+                <span className="cTick">
+                  <Check size={11} />
+                </span>
+                {c}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
 
       <Ledger>
-        <Row k={t.dentistsPage.languages} v={x.languages} />
+        {d.licenseNo ? <Row k={t.dentistsPage.license} v={d.licenseNo} /> : null}
+        {x.languages ? <Row k={t.dentistsPage.languages} v={x.languages} /> : null}
         <Row k={t.dentistsPage.availability} v={x.days} />
       </Ledger>
 

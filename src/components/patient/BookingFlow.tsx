@@ -219,7 +219,7 @@ function DentistRow({
       <span className="pt">
         <span className="pn">{x.name}</span>
         <span className="pp">
-          {x.title} · {d.years} {t.common.years}
+          {d.years > 0 ? `${x.title} · ${d.years} ${t.common.years}` : x.title}
         </span>
         {x.blurb ? <span className="pb">{x.blurb}</span> : null}
         <span className="pAvail">

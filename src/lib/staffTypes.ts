@@ -69,6 +69,8 @@ export interface ShiftHour {
 export interface EditableDentist {
   slug: string;
   years: number;
+  /** เลขที่ใบอนุญาตประกอบวิชาชีพ (ท.xxxx); "" = not recorded */
+  licenseNo: string;
   tint: string;
   face: Record<string, unknown>;
   photo: { small: string; large: string };

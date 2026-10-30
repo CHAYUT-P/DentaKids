@@ -10,7 +10,7 @@
  */
 import "dotenv/config";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
@@ -52,6 +52,7 @@ async function seedDentists() {
       .values({
         slug: d.slug,
         years: d.years,
+        licenseNo: d.licenseNo,
         tint: d.tint,
         face: d.face,
         photoSmall: d.photo.small,
@@ -63,6 +64,7 @@ async function seedDentists() {
         target: dentist.slug,
         set: {
           years: d.years,
+          licenseNo: d.licenseNo,
           tint: d.tint,
           face: d.face,
           photoSmall: d.photo.small,
@@ -104,12 +106,18 @@ async function seedDentists() {
         });
     }
 
-    // treatments this dentist takes — routine visits are ticked like any other
+    // treatments this dentist takes — routine visits are ticked like any other,
+    // and each row keeps the age scope from the roster (a kids-only dentist must
+    // not be bookable for an adult)
     for (const k of new Set([...d.treats, "checkup", "consult", "followup"])) {
+      const ages = d.treatAges?.[k] ?? "both";
       await db
         .insert(dentistTreat)
-        .values({ dentistId: row.id, treatmentKey: k })
-        .onConflictDoNothing();
+        .values({ dentistId: row.id, treatmentKey: k, ages })
+        .onConflictDoUpdate({
+          target: [dentistTreat.dentistId, dentistTreat.treatmentKey],
+          set: { ages },
+        });
     }
 
     // weekly shifts — mirrors the old buildDefaultDentists logic
@@ -139,6 +147,22 @@ async function seedDentists() {
         });
     }
   }
+
+  /**
+   * Retire dentists that are no longer in the roster.
+   *
+   * Upserting on slug only ever adds, so a dentist removed from
+   * src/data/dentists.ts would keep taking bookings forever. They are retired
+   * (is_active = false) rather than deleted, because appointments and invoices
+   * point at them by id — a delete would orphan that history.
+   */
+  const keep = dentistSeed.map((d) => d.slug);
+  const retired = await db
+    .update(dentist)
+    .set({ isActive: false, sort: 9999, updatedAt: new Date() })
+    .where(and(eq(dentist.isActive, true), notInArray(dentist.slug, keep)))
+    .returning({ slug: dentist.slug });
+  for (const r of retired) console.log(`  · retired ${r.slug} (no longer in the roster)`);
 }
 
 async function seedTreatments() {
@@ -320,12 +344,12 @@ async function main() {
   }
 
   // ── one demo waitlist entry + notifications (same as the old mock) ───────
-  const nareeId = dentistIdBySlug.get("naree");
+  const walkInDentistId = dentistIdBySlug.get("onanong");
   await db.insert(waitlistEntry).values({
     childName: "น้องพร้อม",
     guardianPhone: "0898765432",
     treatmentKey: "checkup",
-    dentistId: nareeId ?? null,
+    dentistId: walkInDentistId ?? null,
     arrivedAt: "09:40",
     status: "waiting",
     note: "Walk-in ตรวจฟันครั้งแรก รอต่อจากน้องเจได",
@@ -335,7 +359,7 @@ async function main() {
     {
       type: "online_booking",
       title: "การจองใหม่ออนไลน์ (LINE LIFF)",
-      body: "น้องต้นกล้า จองขูดหินปูน กับ ทพญ. มณีรัตน์ เวลา 13:30 น.",
+      body: "น้องต้นกล้า จองขูดหินปูน กับ ทพ. ขานนท์ เวลา 13:30 น.",
       refCode: "DK-4832",
       isRead: true,
     },

@@ -105,18 +105,18 @@ async function main() {
   {
     // naree takes fluoride for kids only: an adult can't book her for it,
     // a kid can, and "any dentist" for an adult never lands on her
-    const before = (await queries.listDentists()).find((d) => d.slug === "naree")!;
+    const before = (await queries.listDentists()).find((d) => d.slug === "onanong")!;
     const fluorideTreats = [...new Set([...before.treats, "fluoride" as const])];
-    await actions.staffUpdateDentist("naree", { treats: fluorideTreats, treatAges: { fluoride: "kids" } });
-    const naree = (await queries.listDentists()).find((d) => d.slug === "naree")!;
+    await actions.staffUpdateDentist("onanong", { treats: fluorideTreats, treatAges: { fluoride: "kids" } });
+    const naree = (await queries.listDentists()).find((d) => d.slug === "onanong")!;
     ok("dentist setting saved (fluoride: kids only)", naree.treatAges.fluoride === "kids");
     const forAdults = await queries.capableDentistIds("fluoride", "adult");
     const forKids = await queries.capableDentistIds("fluoride", "kid");
     ok("not offered to adults", !forAdults.includes(naree.id));
     ok("offered to kids", forKids.includes(naree.id));
     let d2 = addDays(today, 8);
-    while (!(await queries.slotsForDate(d2)).some((r) => r.dentistSlug === "naree" && !r.taken)) d2 = addDays(d2, 1);
-    const t2 = (await queries.slotsForDate(d2)).find((r) => r.dentistSlug === "naree" && !r.taken)!.time;
+    while (!(await queries.slotsForDate(d2)).some((r) => r.dentistSlug === "onanong" && !r.taken)) d2 = addDays(d2, 1);
+    const t2 = (await queries.slotsForDate(d2)).find((r) => r.dentistSlug === "onanong" && !r.taken)!.time;
     const adultTry = await actions.bookAppointment({
       date: d2, time: t2, treatmentKey: "fluoride", dentistId: naree.id,
       childName: "ผู้ใหญ่ทดสอบ", phone: "0911111111", ageGroup: "adult", lineIdToken: FAMILY,
@@ -130,7 +130,7 @@ async function main() {
     const kidRow = (await queries.listAppointmentsBetween(d2, d2)).find((a) => a.ref === kidTry.ref);
     ok("booking remembers it's for a kid", kidRow?.ageGroup === "kid");
     if (kidTry.ok) await actions.cancelBooking(kidTry.ref!, FAMILY);
-    await actions.staffUpdateDentist("naree", { treats: before.treats, treatAges: before.treatAges }); // restore
+    await actions.staffUpdateDentist("onanong", { treats: before.treats, treatAges: before.treatAges }); // restore
   }
 
   console.log("\n— 4c. One-hour treatments hold two half-hours —");
@@ -200,11 +200,11 @@ async function main() {
   await actions.staffRemoveWaitlist(entry!.id);
 
   console.log("\n— 7. Staff edits content —");
-  const naree = (await queries.listDentists()).find(d => d.slug === "naree")!;
-  await actions.staffUpdateDentist("naree", { text: { th: { blurb: "ดูแลเด็กเล็กและการมาหาหมอฟันครั้งแรก (แก้ไขแล้ว)" } } });
-  const naree2 = (await queries.listDentists()).find(d => d.slug === "naree")!;
+  const naree = (await queries.listDentists()).find(d => d.slug === "onanong")!;
+  await actions.staffUpdateDentist("onanong", { text: { th: { blurb: "ดูแลเด็กเล็กและการมาหาหมอฟันครั้งแรก (แก้ไขแล้ว)" } } });
+  const naree2 = (await queries.listDentists()).find(d => d.slug === "onanong")!;
   ok("dentist blurb edit persisted", naree2.text.th.blurb.includes("แก้ไขแล้ว"));
-  await actions.staffUpdateDentist("naree", { text: { th: { blurb: naree.text.th.blurb } } }); // restore
+  await actions.staffUpdateDentist("onanong", { text: { th: { blurb: naree.text.th.blurb } } }); // restore
 
   await actions.staffUpdatePrice("fluoride", 777);
   const prices = await queries.priceMap();
@@ -319,19 +319,19 @@ async function main() {
   try { await actions.staffUpdateDay(openDayRow.day, { start: "08:45" }); } catch { threw = true; }
   ok("an opening time like 08:45 is refused", threw);
   ok("…and nothing was saved", (await queries.listClinicDays()).find((d) => d.day === openDayRow.day)?.start === openDayRow.start);
-  const nareeNow = (await queries.listDentists()).find((d) => d.slug === "naree")!;
+  const nareeNow = (await queries.listDentists()).find((d) => d.slug === "onanong")!;
   threw = false;
   try {
-    await actions.staffUpdateDentist("naree", { shifts: [{ weekday: 2, enabled: true, start: "09:15", end: "17:00" }] });
+    await actions.staffUpdateDentist("onanong", { shifts: [{ weekday: 2, enabled: true, start: "09:15", end: "17:00" }] });
   } catch { threw = true; }
   ok("a shift starting 09:15 is refused", threw);
-  ok("…and naree's shifts are unchanged", JSON.stringify((await queries.listDentists()).find((d) => d.slug === "naree")!.shifts) === JSON.stringify(nareeNow.shifts));
+  ok("…and naree's shifts are unchanged", JSON.stringify((await queries.listDentists()).find((d) => d.slug === "onanong")!.shifts) === JSON.stringify(nareeNow.shifts));
   // a cancelled booking whose time was taken since can't simply come back
   // the first day ahead with a free time for naree
   let rDay = addDays(today, 3);
   let rTime: string | undefined;
   for (let i = 0; i < 30 && !rTime; i++, rDay = addDays(rDay, 1)) {
-    rTime = (await queries.slotsForDate(rDay)).filter((x) => !x.taken && x.dentistSlug === "naree").map((x) => x.time).sort()[0];
+    rTime = (await queries.slotsForDate(rDay)).filter((x) => !x.taken && x.dentistSlug === "onanong").map((x) => x.time).sort()[0];
     if (rTime) break;
   }
   ok("found a free time for the restore test", !!rTime, rDay);
@@ -343,19 +343,19 @@ async function main() {
   threw = false;
   try { await actions.staffUpdateAppointment(firstId, { status: "confirmed" }); } catch { threw = true; }
   ok("restoring a cancelled booking into a taken time is refused", threw);
-  const atSlot = (await queries.listAppointmentsBetween(rDay, rDay)).filter((a) => a.time === rTime && a.dentistSlug === "naree" && a.status !== "cancelled");
+  const atSlot = (await queries.listAppointmentsBetween(rDay, rDay)).filter((a) => a.time === rTime && a.dentistSlug === "onanong" && a.status !== "cancelled");
   ok("…the dentist still has one booking at that time", atSlot.length === 1);
   for (const a of await queries.listAppointmentsBetween(rDay, rDay)) {
     if (a.childName.startsWith("คืนนัด")) await actions.staffDeleteAppointment(a.id);
   }
 
   console.log("\n— 13. One hold at a time per family —");
-  const { day: hDay } = await bookable(addDays(today, 3), "checkup", naree.id, "naree");
-  const hTimes = [...new Set((await queries.slotsForDate(hDay)).filter((x) => !x.taken && x.dentistSlug === "naree").map((x) => x.time))].sort();
+  const { day: hDay } = await bookable(addDays(today, 3), "checkup", naree.id, "onanong");
+  const hTimes = [...new Set((await queries.slotsForDate(hDay)).filter((x) => !x.taken && x.dentistSlug === "onanong").map((x) => x.time))].sort();
   const h1 = await actions.holdSlot({ date: hDay, time: hTimes[0], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-fam" });
   const h2 = await actions.holdSlot({ date: hDay, time: hTimes[1], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-fam" });
   ok("a family can hold a time", h1.ok && h2.ok);
-  const heldNow = (await queries.slotsForDate(hDay)).filter((x) => x.dentistSlug === "naree" && x.taken).map((x) => x.time);
+  const heldNow = (await queries.slotsForDate(hDay)).filter((x) => x.dentistSlug === "onanong" && x.taken).map((x) => x.time);
   ok("holding another time lets the first one go", !heldNow.includes(hTimes[0]) && heldNow.includes(hTimes[1]), heldNow.join(","));
   const other = await actions.holdSlot({ date: hDay, time: hTimes[0], treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-hold-other" });
   ok("…so another family can hold it", other.ok);
@@ -389,7 +389,7 @@ async function main() {
     ok("a deleted booking leaves a history line with its ref", gone.length === 1 && gone[0].prevStatus === "cancelled");
 
     // demand: a pick that became a booking, then the family moves it
-    const { day: mDay, time: mTime } = await bookable(addDays(today, 2), "checkup", naree.id, "naree");
+    const { day: mDay, time: mTime } = await bookable(addDays(today, 2), "checkup", naree.id, "onanong");
     const mHold = await actions.holdSlot({ date: mDay, time: mTime, treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid", lineIdToken: "e2e-history" });
     const mBook = await actions.bookAppointment({
       date: mDay, time: mTime, treatmentKey: "checkup", dentistId: naree.id, ageGroup: "kid",
@@ -399,7 +399,7 @@ async function main() {
     const mId = (await queries.listAppointmentsBetween(mDay, mDay)).find((a) => a.ref === mBook.ref)!.id;
     const att = await ndb.select().from(bookingAttempt).where(heq(bookingAttempt.appointmentId, mId));
     ok("the website pick is logged and marked booked", att.length === 1 && att[0].outcome === "booked" && att[0].purpose === "new");
-    const nextTime = (await queries.slotsForDate(mDay)).filter((x) => !x.taken && x.dentistSlug === "naree" && x.time > mTime).map((x) => x.time).sort()[0];
+    const nextTime = (await queries.slotsForDate(mDay)).filter((x) => !x.taken && x.dentistSlug === "onanong" && x.time > mTime).map((x) => x.time).sort()[0];
     if (nextTime) {
       const moved = await actions.rescheduleBooking({ ref: mBook.ref!, lineIdToken: "e2e-history", date: mDay, time: nextTime });
       const mv = (await eventsFor(heq(visitEvent.appointmentId, mId))).find((e) => e.kind === "moved");

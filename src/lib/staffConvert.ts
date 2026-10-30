@@ -70,6 +70,7 @@ export function toUIEditableDentist(d: DentistDTO): EditableDentist {
     ...({ _id: d.id } as object), // the DB id, carried for booking mutations
     slug: d.slug,
     years: d.years,
+    licenseNo: d.licenseNo,
     tint: d.tint as EditableDentist["tint"],
     face: d.face as EditableDentist["face"],
     photo: { small: d.photoSmall, large: d.photoLarge },

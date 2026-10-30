@@ -63,6 +63,8 @@ export interface DentistDTO {
   id: number;
   slug: string;
   years: number;
+  /** เลขที่ใบอนุญาตประกอบวิชาชีพ (ท.xxxx); "" = not recorded */
+  licenseNo: string;
   tint: string;
   face: Record<string, unknown>;
   photoSmall: string;
@@ -252,6 +254,7 @@ export async function listDentists(): Promise<DentistDTO[]> {
       id: d.id,
       slug: d.slug,
       years: d.years,
+      licenseNo: d.licenseNo,
       tint: d.tint,
       face: (d.face as Record<string, unknown>) ?? {},
       photoSmall: photoUrl(d.slug, "small", d.photoSmall, d.updatedAt),
@@ -1988,6 +1991,7 @@ export async function markNotificationsRead(): Promise<void> {
 
 export interface DentistUpdate {
   years?: number;
+  licenseNo?: string;
   tint?: string;
   isActive?: boolean;
   photoSmall?: string;
@@ -2070,6 +2074,7 @@ function assertShiftsOnGrid(shifts: { start: string; end: string }[]): void {
 export interface NewDentistInput {
   slug: string;
   years: number;
+  licenseNo?: string;
   tint: string;
   text: Record<"th" | "en", DentistTextDTO>;
   treats: IconKey[];
@@ -2088,6 +2093,7 @@ export async function createDentist(input: NewDentistInput): Promise<void> {
     .values({
       slug: input.slug,
       years: input.years,
+      licenseNo: input.licenseNo ?? "",
       tint: input.tint,
       face: {},
       photoSmall: input.photoSmall ?? "",

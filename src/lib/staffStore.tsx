@@ -512,6 +512,7 @@ export function StaffProvider({
       void mutate("บันทึกข้อมูลแพทย์", () =>
         staffUpdateDentist(slug, {
           years: updates.years,
+          licenseNo: updates.licenseNo,
           tint: updates.tint,
           isActive: updates.isActive,
           photoSmall: updates.photo?.small,
@@ -865,9 +866,9 @@ export function StaffProvider({
 
   const simulateOnlineBooking = useCallback(() => {
     const picks = [
-      { child: "น้องภูผา", age: 6, parent: "คุณแม่อริสา", phone: "0819987766", treat: "fluoride" as IconKey, doc: "naree" },
-      { child: "น้องพอร์ช", age: 4, parent: "คุณพ่อวิเชียร", phone: "0897765544", treat: "checkup" as IconKey, doc: "manee" },
-      { child: "น้องลลิน", age: 7, parent: "คุณแม่สุชาดา", phone: "0853321100", treat: "filling" as IconKey, doc: "siriporn" },
+      { child: "น้องภูผา", age: 6, parent: "คุณแม่อริสา", phone: "0819987766", treat: "fluoride" as IconKey, doc: "onanong" },
+      { child: "น้องพอร์ช", age: 4, parent: "คุณพ่อวิเชียร", phone: "0897765544", treat: "checkup" as IconKey, doc: "khanon" },
+      { child: "น้องลลิน", age: 7, parent: "คุณแม่สุชาดา", phone: "0853321100", treat: "filling" as IconKey, doc: "phannathip" },
     ];
     const pick = picks[Math.floor(Math.random() * picks.length)];
     const times = ["14:00", "15:30", "16:00", "16:30"];

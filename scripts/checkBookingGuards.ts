@@ -21,8 +21,8 @@ async function main() {
   };
 
   const all = await db.select().from(dentist);
-  const naree = all.find((d) => d.slug === "naree")!;
-  const piya = all.find((d) => d.slug === "piya")!;
+  const naree = all.find((d) => d.slug === "onanong")!;
+  const piya = all.find((d) => d.slug === "chawalit")!;
 
   const cases: [string, Parameters<typeof bookAppointment>[0], string][] = [
     ["specialist on capable dentist's day off (any)", { ...base, treatmentKey: "braces", dentistId: null }, "slot_taken"],

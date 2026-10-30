@@ -71,10 +71,19 @@ async function main() {
   check("seed runs", true);
 
   // ── 1. seed idempotency ─────────────────────────────────────────────────
+  // Row count stays put across runs, and the active roster is exactly the
+  // dentists in src/data/dentists.ts (older rows are retired, not deleted).
+  const { dentists: rosterSeed } = await import("../src/data/dentists");
   const c1 = (await db.select().from(dentist)).length;
   await promisify(execFile)("pnpm", ["db:seed"], { cwd: process.cwd() });
   const c2 = (await db.select().from(dentist)).length;
-  check("seed is idempotent (dentists stable)", c1 === c2 && c1 === 5, `${c1} → ${c2}`);
+  const activeCount = (await db.select().from(dentist).where(eq(dentist.isActive, true))).length;
+  check("seed is idempotent (dentists stable)", c1 === c2, `${c1} → ${c2}`);
+  check(
+    "roster matches src/data/dentists.ts",
+    activeCount === rosterSeed.length,
+    `active ${activeCount} vs roster ${rosterSeed.length}`,
+  );
 
   // ── 2. availability reflects bookings ───────────────────────────────────
   const { slotsForDate } = await import("../src/server/queries");
@@ -96,7 +105,7 @@ async function main() {
   // ── 3. createAppointment + double-booking guard ─────────────────────────
   const { createAppointment, listAppointmentsBetween } = await import("../src/server/queries");
   const dentistsAll = await db.select().from(dentist).where(eq(dentist.isActive, true));
-  const naree = dentistsAll.find((d) => d.slug === "naree")!;
+  const naree = dentistsAll.find((d) => d.slug === "onanong")!;
   const targetDate = nextWeekday();
   const targetTime = "13:00";
 
@@ -307,14 +316,14 @@ async function main() {
 
   // ── 7. roster deactivation ──────────────────────────────────────────────
   const { updateDentist } = await import("../src/server/queries");
-  const siriporn = dentistsAll.find((d) => d.slug === "siriporn")!;
-  await updateDentist("siriporn", { isActive: false });
+  const siriporn = dentistsAll.find((d) => d.slug === "phannathip")!;
+  await updateDentist("phannathip", { isActive: false });
   const slotsNoSiriporn = await slotsForDate(targetDate);
   check(
     "deactivated dentist leaves availability",
     !slotsNoSiriporn.some((s) => s.dentistId === siriporn.id),
   );
-  await updateDentist("siriporn", { isActive: true }); // restore
+  await updateDentist("phannathip", { isActive: true }); // restore
 
   // ── cleanup: remove test bookings/notifications, reseed demo ────────────
   await db.delete(appointment).where(eq(appointment.phone, "0990000001"));
